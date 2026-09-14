@@ -63,3 +63,46 @@ instead of the real client's.
 The live view is Server-Sent Events. Warcon pings every 15s and recycles each stream
 every 5 minutes, both well inside Cloudflare's ~100s idle timeout, and the browser
 reconnects on its own behind a 20s safety poll. The proxy is safe here.
+
+## Railway specifics
+
+Project `warcon`, service `warcon`, environment `production`, region `iad`.
+
+**Static outbound IPs are enabled** so the game host can firewall the RCON port:
+
+    162.220.234.242
+    152.55.180.242
+    152.55.180.243
+
+These are Railway's **shared** egress addresses, not dedicated to this account.
+Allowlisting them narrows the exposure from the whole internet to Railway's egress
+pool -- worth doing, but it is not the same as a private link. The RCON password is
+still what actually authenticates, so treat the firewall as defence in depth.
+
+Changing static IP or IPv6 settings needs a redeploy before outbound traffic moves.
+
+**`railway.json` is deprecated** in favour of `.railway/railway.ts`, and stops working
+**2026-12-01**. `railway config migrate` currently drops `restartPolicyType` and
+`restartPolicyMaxRetries` and comments out the builder settings, so it was not applied.
+Redo the migration by hand before the deadline and check the restart policy survives.
+
+## First-run setup
+
+`SETUP_TOKEN` is set (Doppler `warcon/prd`) so the first-run owner form cannot be
+claimed by whoever finds the URL first:
+
+    doppler secrets get SETUP_TOKEN --plain --project warcon --config prd
+
+The setup form disappears once a site owner exists, so this matters only on a fresh
+database. If the panel is ever rebuilt from scratch, set `SETUP_TOKEN` *before*
+pointing DNS at it -- there is otherwise a window where the panel is reachable and
+unclaimed.
+
+## Still to do
+
+- Add `https://rcon.manticorps.gg/api/auth/callback/discord` as an OAuth2 redirect on
+  the Discord application, or Discord sign-in returns an invalid-redirect error.
+- Set `ALLOW_DEMO_SERVER=false` once the demo server is no longer wanted.
+- Cloudflare SSL/TLS mode for this zone is **Full**, not **Full (strict)**. Strict
+  validates the origin certificate; Railway serves a valid one, so it would work. The
+  setting is zone-wide and affects every site on manticorps.gg, so it was left alone.
