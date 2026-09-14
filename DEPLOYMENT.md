@@ -106,3 +106,43 @@ unclaimed.
 - Cloudflare SSL/TLS mode for this zone is **Full**, not **Full (strict)**. Strict
   validates the origin certificate; Railway serves a valid one, so it would work. The
   setting is zone-wide and affects every site on manticorps.gg, so it was left alone.
+
+## Branding
+
+The panel wears the Manticorps skin. Upstream keeps its colour tokens
+deliberately generic (`ink` / `mist` / `accent`) "so components read the same
+whatever the skin", so the whole re-skin is one file, `src/brand.css`, which
+restates those tokens and is imported after `app.css` in `+layout.svelte`.
+**`app.css` is never edited**, so a merge from upstream cannot conflict with the
+palette.
+
+Values come from `manticorps-website/src/app/globals.css`, which is sampled from
+`crest-v4`. Two rules from the site's brief carry over and are worth not
+undoing:
+
+- **The neutrals are warm.** Upstream's ink ramp is a cool blue-grey; the site's
+  drab ramp is olive/khaki/bone. That single substitution is most of what makes
+  the panel read as kit rather than as a generic dashboard.
+- **Green is split by job.** `--green-500` (`#1AAE10`, the chevron) is for fills
+  and rules and is bound to `--color-accent`; `--green-400` (`#33E133`, the
+  wordmark) is signal and is bound to `--color-accent-2`, so it lights up on
+  hover. Binding the vivid wordmark green to `--color-accent` was tried first
+  and made half the chrome shout, because upstream spends that one token on
+  fills, rules, badges, active tabs and the avatar chip at once.
+
+`--color-ok` / `warn` / `danger` / `info` / `override` are deliberately **not**
+overridden. They carry state, not brand. Upstream's muted `#7BC462` "ok" stays
+readable next to the accent green precisely because it is duller; making both
+the same green would cost the panel the difference between "this is good" and
+"this is the control".
+
+`Mark.svelte` is the head mark (`static/brand/mark.png`), not the full crest:
+the crest's own lettering is illegible below ~64px, and both places the mark
+renders already set the name in type beside it.
+
+Icons in `static/` are generated from the site's `public/brand/crest.png`.
+`favicon.ico` is a 16/32/48 multi-size built from the head mark on a
+`--drab-950` plate, and is the same file the website serves, so both properties
+share a tab icon. A detailed illustration has a floor at 16px; if the favicon
+ever needs to be sharper, the answer is a simplified mark (the crest's chevron),
+not more resampling.

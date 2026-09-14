@@ -2,22 +2,15 @@
 	let { size = 28 }: { size?: number } = $props();
 </script>
 
-<!-- Brass plate with a cut corner and a target reticle: flat, no gradients. -->
-<span
-	class="inline-flex shrink-0 items-center justify-center bg-accent text-ink-950"
-	style="width:{size}px;height:{size}px;clip-path:polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))"
+<!--
+	The Manticorps head mark. The site's brief pairs a small crest with live type rather than the
+	full crest, because the crest's own lettering is illegible below ~64px -- and both places this
+	renders (the app header and the sign-in card) already set the name in type beside it.
+-->
+<img
+	src="/brand/mark.png"
+	alt=""
 	aria-hidden="true"
->
-	<svg
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		stroke-width="2.2"
-		stroke-linecap="square"
-		style="width:{size * 0.62}px;height:{size * 0.62}px"
-	>
-		<circle cx="12" cy="12" r="6" />
-		<path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
-		<circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
-	</svg>
-</span>
+	class="inline-block shrink-0 object-contain"
+	style="width:{size}px;height:{size}px"
+/>

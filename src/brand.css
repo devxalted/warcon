@@ -1,0 +1,45 @@
+/*
+ * Manticorps skin for Warcon.
+ *
+ * Upstream keeps its token names generic (ink / mist / accent) precisely so the panel can be
+ * re-skinned without touching components, so this file only restates those tokens and never
+ * edits app.css. Keeping it separate means `git merge upstream/main` cannot conflict here.
+ *
+ * Values are the site's palette (manticorps-website/src/app/globals.css), which is sampled from
+ * crest-v4. Two rules from the site's brief carry over:
+ *
+ *   - The neutrals are WARM -- olive, khaki, bone, not the cool blue-grey upstream ships. That one
+ *     substitution is most of what makes this read as kit rather than as a generic dashboard.
+ *   - Green is signal, not decoration: the thing you click or the thing that is happening now.
+ *     So it lands on --color-accent only, and the semantic state colours below are left alone.
+ */
+
+:root {
+	/* Surfaces: cool charcoal -> the warm drab ramp. */
+	--color-ink-950: #0e0e0b; /* page          (site --drab-950) */
+	--color-ink-900: #14140f; /* panel         (site --drab-900) */
+	--color-ink-800: #1a1a14; /* raised/hover  (site --drab-850) */
+	--color-ink-700: #2f2e24; /* hard line     (site --drab-700) */
+
+	/* Type. Upstream's mist ramp maps onto the site's ink roles, which are contrast-checked:
+	   --drab-350 is the lowest step that still passes 4.5:1 on the ground, and mist-400 is the
+	   panel's main secondary text (161 uses), so it must not go below that. mist-600 is
+	   decoration only, which is what --drab-500 is for. */
+	--color-mist-100: #c9c3b6; /* primary ink   (site --ink / --drab-100) */
+	--color-mist-400: #8a8373; /* secondary     (site --ink-dim / --drab-350) */
+	--color-mist-600: #55523f; /* decoration    (site --drab-500) */
+
+	/* Brass -> green, split the way the site splits it. --green-500 is "the chevron: the green for
+	   fills and rules"; --green-400 is "the wordmark: the green for signal". Upstream spends
+	   --color-accent on fills, rules, badges, active tabs and the avatar chip all at once, so
+	   binding it to the vivid wordmark green made half the chrome shout. The chevron green is the
+	   base, and the wordmark green is what lights up on hover. */
+	--color-accent: #1aae10; /* fills and rules (site --signal-fill / --green-500) */
+	--color-accent-2: #33e133; /* lit on hover   (site --signal / --green-400) */
+	--color-lilac: #33e133; /* accent as text: the brighter step reads better on the ground */
+
+	/* --color-ok / warn / danger / info / override are deliberately NOT overridden. They carry
+	   state, not brand, and upstream's muted #7bc462 "ok" stays legible next to the vivid accent
+	   green precisely because it is duller. Making both the same green would cost the panel the
+	   distinction between "this is good" and "this is the control". */
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import '../brand.css';
 	import Toasts from '$lib/components/Toasts.svelte';
 	import ConfirmHost from '$lib/components/ConfirmHost.svelte';
 	import type { LayoutProps } from './$types';
