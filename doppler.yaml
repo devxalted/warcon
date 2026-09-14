@@ -1,0 +1,9 @@
+# Warcon's secrets live in the `warcon` Doppler project. Railway injects its own
+# variables at deploy time, so this binding is for local maintenance only --
+# `doppler run -- bun run db:migrate` and the like, which must run against the
+# same database the deployed panel uses.
+#
+#   doppler setup --no-interactive
+setup:
+  project: warcon
+  config: prd
