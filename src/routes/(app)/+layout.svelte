@@ -24,15 +24,22 @@
 
 	// What the Orgs nav item should be for this person.
 	//
-	// Upstream shows "Orgs" to everyone, but the list page is only useful if you run more than one
-	// org, and org management is owners-only anyway (/orgs/[id] requires it, as do the API routes).
-	// So: the site owner keeps the list because they genuinely oversee every org; someone who runs
-	// exactly one org goes straight to it; anyone who runs none -- an operator or a viewer -- gets no
-	// nav item at all rather than a link to a page that would refuse them.
+	// Upstream shows "Orgs" to everyone, which is a link to a page most people cannot use. The tiers
+	// below mirror what the org routes actually allow, so the nav never offers a door that is locked:
 	//
-	// Suspended orgs are excluded on purpose: their owners cannot add servers or invite, so there is
-	// nothing to manage. That matches how `canManage` counts them server-side.
+	//   site owner        -> the list; they really do oversee every org
+	//   owns one org      -> straight into managing it (/orgs/<id> requires org owner)
+	//   owns several      -> the list, since a direct link would have to pick one
+	//   may edit its lists-> straight to the org's ban list (/orgs/<id>/bans takes lists.edit too,
+	//                        via requireListsRole; the overview above it is still owner-only)
+	//   anyone else       -> nothing
+	//
+	// The lists tier matters: the built-in `admin` server role includes `lists.edit`, so server
+	// admins may genuinely open the org's ban and reserved lists, and the header is their only way
+	// in. `OrgSummary.lists` is the server's own answer to "may open them", so this cannot drift
+	// from the route guard. Suspended orgs are excluded throughout, matching `canManage`.
 	let ownedOrgs = $derived(data.orgs.filter((o) => o.role === 'owner' && !o.suspended));
+	let listOrgs = $derived(data.orgs.filter((o) => o.lists && !o.suspended));
 	let orgNav = $derived.by((): { href: string; label: string; title: string } | null => {
 		if (data.user.role === 'owner')
 			return { href: '/orgs', label: 'Orgs', title: 'All organisations' };
@@ -44,6 +51,14 @@
 			};
 		if (ownedOrgs.length > 1)
 			return { href: '/orgs', label: 'Orgs', title: 'Organisations you run' };
+		if (listOrgs.length === 1)
+			return {
+				href: `/orgs/${encodeURIComponent(listOrgs[0].id)}/bans`,
+				label: listOrgs[0].name,
+				title: `${listOrgs[0].name} ban and reserved lists`
+			};
+		if (listOrgs.length > 1)
+			return { href: '/orgs', label: 'Orgs', title: 'Organisation lists you may edit' };
 		return null;
 	});
 	let switcherOpen = $state(false);
