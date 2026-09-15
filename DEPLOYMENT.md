@@ -203,13 +203,29 @@ The nav item is now decided per person in `(app)/+layout.svelte`:
 | Site owner                       | **Orgs** -> `/orgs` (they do oversee all of them) |
 | Owner of exactly one org         | the org's name -> `/orgs/<id>`                    |
 | Owner of several orgs            | **Orgs** -> `/orgs`                               |
+| May edit one org's lists         | the org's name -> `/orgs/<id>/bans`               |
+| May edit several orgs' lists     | **Orgs** -> `/orgs`                               |
 | Everyone else (operator, viewer) | nothing at all                                    |
 
 Suspended orgs do not count towards "owns", matching how `canManage` counts them server-side: a
 suspended org's owner cannot add servers or invite, so there is nothing to manage.
 
-This is presentation only -- it hides a link, it does not grant or refuse anything. The page and
-the API were already owners-only and still are. Both the desktop nav and the mobile menu use the
+**The lists tier is not optional.** The built-in `admin` server role includes `lists.edit`, so
+server admins may genuinely open an org's ban and reserved lists: `/orgs/<id>/bans` and
+`/reserved` are guarded by `requireListsRole` (owner _or_ `lists.edit`), and the org layout admits
+them while the overview above it stays owner-only. The header is their only route in, so a first
+pass keyed solely on org ownership silently took it away from them. The tier reads
+`OrgSummary.lists`, which is the server's own answer to "may open these", so the nav cannot drift
+from the route guard.
+
+This is presentation only -- it hides a link, it does not grant or refuse anything, and every tier
+above was checked to answer 200 rather than 403. Both the desktop nav and the mobile menu use the
 same derived value.
+
+Note what this does **not** do: org _management_ -- invites, members, roles, adding servers -- is
+owner-only in Warcon and stays that way. A server admin who needs that must be promoted to org
+owner, and **org owners hold every capability on every server in the org**, including
+`config.apply` and therefore the unredacted config document with the RCON password in it. That is
+a deliberate trade to make knowingly, not a gap to close by accident.
 
 Another upstream divergence that will conflict on merge; see the note under **Read capabilities**.
