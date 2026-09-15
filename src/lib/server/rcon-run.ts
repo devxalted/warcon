@@ -9,6 +9,7 @@ import { ACTIONS, ACTION_NAMES } from './actions';
 import { GameError } from './rcon';
 import { gateway } from './gateway';
 import { assertRate } from './ratelimit';
+import { shapeConfigResult, visibilityFor } from './config-visibility';
 
 function safe<T>(fn: () => T, fallback: T): T {
 	try {
@@ -93,7 +94,11 @@ export async function runAction(
 
 	const started = Date.now();
 	try {
-		const result = await gateway().run(env, server, name, params);
+		const raw = await gateway().run(env, server, name, params);
+		// The config document carries the game server's RCON password in plain text, so how much of
+		// it comes back is decided here, by capability, after the game server answers -- never by the
+		// browser. See config-visibility.ts for why this cannot just be a capability on the action.
+		const result = name === 'config' ? shapeConfigResult(raw, visibilityFor(access.caps)) : raw;
 		const durationMs = Date.now() - started;
 		// The panel shows what the worker last saw; after a change, have it look again now.
 		if (def.mutating) gateway().observeSoon(server.id);

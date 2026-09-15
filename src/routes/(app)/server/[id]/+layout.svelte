@@ -5,24 +5,30 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import RoleBadge from '$lib/components/RoleBadge.svelte';
 	import { toast } from '$lib/toast.svelte';
+	import { can, type Capability } from '$lib/capabilities';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 
+	// A tab with a capability shows only for roles that hold it; the matching `load` refuses the
+	// URL as well, so this is presentation rather than the boundary itself.
 	const TABS = [
-		['', 'Overview'],
-		['/players', 'Players'],
-		['/bans', 'Bans'],
-		['/slots', 'Reserved slots'],
-		['/rotation', 'Map rotation'],
-		['/config', 'Configuration'],
-		['/automation', 'Automation'],
-		['/analytics', 'Analytics'],
-		['/log', 'Server log']
-	] as const;
+		['', 'Overview', null],
+		['/players', 'Players', null],
+		['/bans', 'Bans', null],
+		['/slots', 'Reserved slots', 'slots.read'],
+		['/rotation', 'Map rotation', null],
+		['/config', 'Configuration', 'config.read'],
+		['/automation', 'Automation', 'automation.read'],
+		['/analytics', 'Analytics', null],
+		['/log', 'Server log', null]
+	] as const satisfies readonly (readonly [string, string, Capability | null])[];
 	// Discord webhooks are an org owner's to manage, so the tab shows for them alone.
 	let visibleTabs = $derived(
-		data.server.manager ? [...TABS, ['/discord', 'Discord'] as const] : [...TABS]
+		[
+			...TABS.filter(([, , cap]) => !cap || can(data.server.caps, cap)),
+			...(data.server.manager ? [['/discord', 'Discord', null] as const] : [])
+		].map(([path, label]) => [path, label] as const)
 	);
 	let base = $derived(`/server/${encodeURIComponent(data.server.id)}`);
 	let current = $derived(page.url.pathname.slice(base.length) || '');

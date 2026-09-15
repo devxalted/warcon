@@ -113,6 +113,13 @@
       "when": 1789382776572,
       "tag": "0015_server_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789436884670,
+      "tag": "0016_read_capabilities",
+      "breakpoints": true
     }
   ]
 }

@@ -362,7 +362,7 @@ export const ACTIONS: Record<string, ActionDef> = {
 		})
 	},
 	reserved: {
-		cap: 'server.view',
+		cap: 'slots.read',
 		mutating: false,
 		run: async (c) => ({
 			reserved: (await c.json('GET', '/v1/reserved-slots')).reservedSlots || []

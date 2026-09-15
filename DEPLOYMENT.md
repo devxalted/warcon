@@ -94,7 +94,7 @@ claimed by whoever finds the URL first:
     doppler secrets get SETUP_TOKEN --plain --project warcon --config prd
 
 The setup form disappears once a site owner exists, so this matters only on a fresh
-database. If the panel is ever rebuilt from scratch, set `SETUP_TOKEN` *before*
+database. If the panel is ever rebuilt from scratch, set `SETUP_TOKEN` _before_
 pointing DNS at it -- there is otherwise a window where the panel is reachable and
 unclaimed.
 
@@ -146,3 +146,45 @@ Icons in `static/` are generated from the site's `public/brand/crest.png`.
 share a tab icon. A detailed illustration has a floor at 16px; if the favicon
 ever needs to be sharper, the answer is a simplified mark (the crest's chevron),
 not more resampling.
+
+## Read capabilities (local divergence from upstream)
+
+Upstream has one read capability, `server.view`, and it grants everything: status, players,
+rotation, bans, reserved slots, **the config document**, server log, analytics, dossiers and
+automation rules. There is no way to express "may see players but not config", which is why every
+tier saw everything.
+
+The config document is the serious part. On a WARDOGS server it contains the RCON password in
+plain text under `[/Script/WDRCON.WDRCONSettings]`, upstream gates the `config` read on
+`server.view`, and the Configuration tab's raw editor renders the whole document (`readOnly` only
+disables *editing*). So any viewer could read the RCON password and then drive the game server
+directly -- no role, no ban list, no audit trail. That defeats the panel's stated premise that
+nobody on the team needs the RCON password.
+
+Three read capabilities now exist: `config.read`, `slots.read`, `automation.read`. All three are
+**admin-only by default** -- absent from viewer and operator -- and migration `0016` grants each to
+any role that already held the matching manage capability, so raising the floor never took a tab
+away from a role that could already edit what was behind it.
+
+**The config document could not simply be gated**, because builds without the live rotation routes
+(CL-499480, CL-501228 -- ours) edit the map rotation *through that document*, and operators need
+the rotation tab. So visibility is shaped by capability instead, in `config-visibility.ts`:
+
+| Capability      | Sees                                              |
+| --------------- | ------------------------------------------------- |
+| `config.apply`  | the whole document (they can already write it)    |
+| `config.read`   | the whole document, secret values stripped        |
+| neither         | the map rotation section alone, also stripped     |
+
+Shaping happens in `rcon-run.ts` after the game server answers, never in the browser.
+
+`tab-guard.ts` refuses the pages themselves. Hiding a tab is presentation; the guard is the
+boundary. It answers **404, not 403** -- whether a server has automation rules is itself not a
+viewer's business, and `requireServerCap` already 404s for a server you cannot see, so the two are
+indistinguishable from outside. The Automation tab previously had no `load` check at all and
+handed every trigger to any viewer in the SSR payload; that is closed too.
+
+**This diverges from upstream and will conflict on merge**, unlike the branding. The changed files
+are `capabilities.ts`, `actions.ts`, `rcon-run.ts`, the server layout, three page loads and
+migration `0016`; the logic itself lives in two new files that cannot conflict. If upstream takes
+the fix, drop this and revert to theirs.

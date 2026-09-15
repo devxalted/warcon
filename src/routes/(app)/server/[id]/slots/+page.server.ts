@@ -2,10 +2,12 @@ import type { PageServerLoad } from './$types';
 import { getEnv } from '$lib/server/env';
 import { getOrg, getServer, listsRoleFor, requireUser } from '$lib/server/access';
 import { orgListsView, serverListsState } from '$lib/server/lists';
+import { requireTabCap } from '$lib/server/tab-guard';
 
-/** The server layout already refused anyone without access; viewers see the slots read-only. */
+/** Who holds a reserved slot is admin-only by default; the layout does not check that. */
 export const load: PageServerLoad = async ({ locals, params }) => {
 	const env = getEnv();
+	await requireTabCap(env, locals, params.id, 'slots.read');
 	const user = requireUser(locals);
 	const server = await getServer(env, params.id);
 	if (!server) return { listState: null, orgLists: null };

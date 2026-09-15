@@ -5,6 +5,9 @@
 
 export const CAPABILITIES = [
 	'server.view',
+	'config.read',
+	'slots.read',
+	'automation.read',
 	'chat.send',
 	'players.moderate',
 	'match.control',
@@ -45,7 +48,22 @@ export interface CapabilityInfo {
 export const CAPABILITY_INFO: Record<Capability, CapabilityInfo> = {
 	'server.view': {
 		label: 'View',
-		hint: 'Status, players, rotation, bans, reserved slots, config, server log, analytics, player dossiers, triggers.',
+		hint: 'Status, players, map rotation, bans, server log, analytics, player dossiers.',
+		group: 'read'
+	},
+	'config.read': {
+		label: 'See config',
+		hint: "Read the server's configuration document. Without it the Configuration tab is hidden and only the map rotation section is readable. Secret values (RCON and join passwords) are stripped unless the role can also apply config.",
+		group: 'read'
+	},
+	'slots.read': {
+		label: 'See reserved slots',
+		hint: 'Read who holds a reserved slot on this server. Without it the Reserved slots tab is hidden.',
+		group: 'read'
+	},
+	'automation.read': {
+		label: 'See automation',
+		hint: 'Read the automation rules on this server. Without it the Automation tab is hidden.',
 		group: 'read'
 	},
 	'chat.send': {
@@ -140,7 +158,14 @@ const OPERATOR: Capability[] = [
 	'players.notes'
 ];
 
-/** What each built-in role starts with; owners may change them per organisation. */
+/**
+ * What each built-in role starts with; owners may change them per organisation.
+ *
+ * The three read capabilities added above are deliberately absent from viewer and operator: the
+ * config document, the reserved-slot roster and the automation rules are admin-only by default.
+ * Anyone who can already manage one of those gets the matching read in migration 0016, so raising
+ * this floor never takes a tab away from a role that could edit it.
+ */
 export const BUILTIN_CAPABILITIES: Record<BuiltinRole, Capability[]> = {
 	viewer: ['server.view'],
 	operator: OPERATOR,
