@@ -188,3 +188,28 @@ handed every trigger to any viewer in the SSR payload; that is closed too.
 are `capabilities.ts`, `actions.ts`, `rcon-run.ts`, the server layout, three page loads and
 migration `0016`; the logic itself lives in two new files that cannot conflict. If upstream takes
 the fix, drop this and revert to theirs.
+
+## Org navigation
+
+Upstream shows an **Orgs** nav item to everyone. The list page is only useful to someone who runs
+more than one organisation, and org management is owners-only anyway (`/orgs/[id]` calls
+`requireOrgRole(..., 'owner')`, as do its API routes), so for most people it was a link to a page
+that would refuse them.
+
+The nav item is now decided per person in `(app)/+layout.svelte`:
+
+| Who                              | Nav item                                          |
+| -------------------------------- | ------------------------------------------------- |
+| Site owner                       | **Orgs** -> `/orgs` (they do oversee all of them) |
+| Owner of exactly one org         | the org's name -> `/orgs/<id>`                    |
+| Owner of several orgs            | **Orgs** -> `/orgs`                               |
+| Everyone else (operator, viewer) | nothing at all                                    |
+
+Suspended orgs do not count towards "owns", matching how `canManage` counts them server-side: a
+suspended org's owner cannot add servers or invite, so there is nothing to manage.
+
+This is presentation only -- it hides a link, it does not grant or refuse anything. The page and
+the API were already owners-only and still are. Both the desktop nav and the mobile menu use the
+same derived value.
+
+Another upstream divergence that will conflict on merge; see the note under **Read capabilities**.

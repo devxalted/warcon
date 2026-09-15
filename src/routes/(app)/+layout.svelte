@@ -21,6 +21,31 @@
 	);
 	// Group the switcher by org once the user can see more than one.
 	let multiOrg = $derived(new Set(data.servers.map((s) => s.orgId)).size > 1);
+
+	// What the Orgs nav item should be for this person.
+	//
+	// Upstream shows "Orgs" to everyone, but the list page is only useful if you run more than one
+	// org, and org management is owners-only anyway (/orgs/[id] requires it, as do the API routes).
+	// So: the site owner keeps the list because they genuinely oversee every org; someone who runs
+	// exactly one org goes straight to it; anyone who runs none -- an operator or a viewer -- gets no
+	// nav item at all rather than a link to a page that would refuse them.
+	//
+	// Suspended orgs are excluded on purpose: their owners cannot add servers or invite, so there is
+	// nothing to manage. That matches how `canManage` counts them server-side.
+	let ownedOrgs = $derived(data.orgs.filter((o) => o.role === 'owner' && !o.suspended));
+	let orgNav = $derived.by((): { href: string; label: string; title: string } | null => {
+		if (data.user.role === 'owner')
+			return { href: '/orgs', label: 'Orgs', title: 'All organisations' };
+		if (ownedOrgs.length === 1)
+			return {
+				href: `/orgs/${encodeURIComponent(ownedOrgs[0].id)}`,
+				label: ownedOrgs[0].name,
+				title: `Manage ${ownedOrgs[0].name}`
+			};
+		if (ownedOrgs.length > 1)
+			return { href: '/orgs', label: 'Orgs', title: 'Organisations you run' };
+		return null;
+	});
 	let switcherOpen = $state(false);
 	let scopeOpen = $state(false);
 	let userOpen = $state(false);
@@ -241,7 +266,14 @@
 					>Servers</a
 				>
 			{/if}
-			<a href="/orgs" class="nav-pill {isActive('/orgs') ? 'nav-pill-active' : ''}">Orgs</a>
+			{#if orgNav}
+				<a
+					href={orgNav.href}
+					title={orgNav.title}
+					class="nav-pill max-w-[160px] truncate {isActive('/orgs') ? 'nav-pill-active' : ''}"
+					>{orgNav.label}</a
+				>
+			{/if}
 			{#if data.user.role === 'owner'}
 				<a href="/users" class="nav-pill {isActive('/users') ? 'nav-pill-active' : ''}">Users</a>
 				<a href="/settings" class="nav-pill {isActive('/settings') ? 'nav-pill-active' : ''}"
@@ -295,7 +327,9 @@
 						{#if data.canManage}
 							<a href="/servers" class="menu-item" role="menuitem">Servers</a>
 						{/if}
-						<a href="/orgs" class="menu-item" role="menuitem">Orgs</a>
+						{#if orgNav}
+							<a href={orgNav.href} class="menu-item" role="menuitem">{orgNav.label}</a>
+						{/if}
 						{#if data.user.role === 'owner'}
 							<a href="/users" class="menu-item" role="menuitem">Users</a>
 							<a href="/settings" class="menu-item" role="menuitem">Settings</a>
