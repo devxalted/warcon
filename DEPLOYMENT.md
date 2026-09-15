@@ -157,7 +157,7 @@ tier saw everything.
 The config document is the serious part. On a WARDOGS server it contains the RCON password in
 plain text under `[/Script/WDRCON.WDRCONSettings]`, upstream gates the `config` read on
 `server.view`, and the Configuration tab's raw editor renders the whole document (`readOnly` only
-disables *editing*). So any viewer could read the RCON password and then drive the game server
+disables _editing_). So any viewer could read the RCON password and then drive the game server
 directly -- no role, no ban list, no audit trail. That defeats the panel's stated premise that
 nobody on the team needs the RCON password.
 
@@ -167,14 +167,14 @@ any role that already held the matching manage capability, so raising the floor 
 away from a role that could already edit what was behind it.
 
 **The config document could not simply be gated**, because builds without the live rotation routes
-(CL-499480, CL-501228 -- ours) edit the map rotation *through that document*, and operators need
+(CL-499480, CL-501228 -- ours) edit the map rotation _through that document_, and operators need
 the rotation tab. So visibility is shaped by capability instead, in `config-visibility.ts`:
 
-| Capability      | Sees                                              |
-| --------------- | ------------------------------------------------- |
-| `config.apply`  | the whole document (they can already write it)    |
-| `config.read`   | the whole document, secret values stripped        |
-| neither         | the map rotation section alone, also stripped     |
+| Capability     | Sees                                           |
+| -------------- | ---------------------------------------------- |
+| `config.apply` | the whole document (they can already write it) |
+| `config.read`  | the whole document, secret values stripped     |
+| neither        | the map rotation section alone, also stripped  |
 
 Shaping happens in `rcon-run.ts` after the game server answers, never in the browser.
 
