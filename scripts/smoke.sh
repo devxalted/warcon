@@ -285,9 +285,18 @@ check member-slot '76561198100000801' "$(req $J1 GET /api/servers/$SID/rcon/rese
 check member-entry '"member":true' "$(req $J1 GET /api/orgs/$ORG/lists/reserve/entries)"
 check member-off '"sync"' "$(req $J1 PATCH /api/orgs/$ORG '{"membersReserved":false}')"
 check member-slot-gone '0' "$(req $J1 GET /api/servers/$SID/rcon/reserved | grep -c 76561198100000801)"
-for i in $(seq 1 12); do R=$(req $J1 GET /api/servers/$SID/lists/state); [[ "$R" != *76561198100000701* ]] && break; sleep 3; done
+# Wait for the sweep, not for the state view. `lists/state` works out expiry as it renders, so the
+# entry leaves it the moment the clock passes -- while `removal` and the audit row are written by
+# expireEntries on the poller's tick, which has not necessarily run yet. Polling the state made
+# this loop exit immediately and the two checks below race the poller.
+for i in $(seq 1 20); do
+	ROWS=$(req $J1 GET "/api/orgs/$ORG/lists/ban/entries?includeRemoved=1")
+	[[ "$ROWS" == *'"removal":"expired"'* ]] && break
+	sleep 3
+done
+R=$(req $J1 GET /api/servers/$SID/lists/state)
 check expiry-lifted '0' "$(echo "$R" | grep -c 76561198100000701)"
-check expiry-row '"removal":"expired"' "$(req $J1 GET "/api/orgs/$ORG/lists/ban/entries?includeRemoved=1")"
+check expiry-row '"removal":"expired"' "$ROWS"
 check audit-expire '"action":"list.expire"' "$(req $J1 GET '/api/audit?action=list.expire')"
 
 echo "== analytics"
