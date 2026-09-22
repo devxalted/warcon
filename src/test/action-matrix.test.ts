@@ -1,6 +1,8 @@
 // Every game action (src/lib/server/actions.ts), asked by every member of the cast through the
 // one route that runs them. The table is kept here, apart from the registry, on purpose: moving
 // an action to another capability means changing both, and an action added without a line fails.
+// This proves who may *call* an action. How much of the config document a caller then sees is a
+// separate question, shaped server-side and covered by config-visibility.test.ts.
 import { beforeAll, describe, expect, test } from 'bun:test';
 import type { Env } from '$lib/server/env';
 import type { Capability } from '$lib/capabilities';
@@ -22,7 +24,7 @@ const ACTION_CAPS: Record<string, Capability> = {
 	catalog: 'server.view',
 	rotation: 'server.view',
 	bans: 'server.view',
-	reserved: 'server.view',
+	reserved: 'slots.read',
 	sponsor: 'server.view',
 
 	broadcast: 'chat.send',
@@ -47,7 +49,7 @@ const ACTION_CAPS: Record<string, Capability> = {
 	rotationSave: 'rotation.save',
 	rotationSettings: 'rotation.save',
 	serverLog: 'audit.read',
-	config: 'config.apply',
+	config: 'config.read',
 	settings: 'config.apply',
 	configValidate: 'config.apply',
 	configApply: 'config.apply',

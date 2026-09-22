@@ -25,7 +25,7 @@ const FAMILIES: { under: string; needs: RegExp; says: string }[] = [
 	{ under: 'admin/', needs: /role !== 'owner'|requireOwner\(/, says: 'the site owner check' },
 	{
 		under: 'server/[id]/',
-		needs: /requireServerCap\(|requireServerManager\(|orgRoleFor\(|await parent\(\)|parent\(\),/,
+		needs: /requireServerCap\(|requireServerManager\(|requireTabCap\(|orgRoleFor\(|await parent\(\)|parent\(\),/,
 		says: 'requireServerCap (or the layout through parent())'
 	},
 	{

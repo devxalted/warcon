@@ -481,7 +481,11 @@ export const ACTIONS: Record<string, ActionDef> = {
 	// needs them from here (README, "Roles"). The rest of the document (the join password, the
 	// admin list, every setting) is for those who may apply it.
 	config: {
-		cap: 'config.apply',
+		// The read gate, not the apply gate: a role may be given 'config.read' to see the document
+		// without being able to change it, and rcon-run.ts redacts the secrets for anyone who does
+		// not also hold 'config.apply' (config-visibility.ts). Upstream has no such split and gates
+		// this on apply; leaving it there would open the tab for a reader and then refuse the fetch.
+		cap: 'config.read',
 		mutating: false,
 		run: async (c) => {
 			const doc = await readConfig(c);

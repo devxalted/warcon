@@ -21,5 +21,8 @@ export async function requireTabCap(
 ): Promise<void> {
 	const user = requireUser(locals);
 	const access = await serverAccessFor(env, user, serverId);
-	if (!access || !access.caps.has(cap)) error(404, 'Not found');
+	// The same words `requireServerCap` uses for a server you cannot see at all, so a tab you
+	// may not read and a server you may not open are the same answer.
+	if (!access || !access.caps.has(cap))
+		error(404, 'Server not found, or you have no access to it.');
 }

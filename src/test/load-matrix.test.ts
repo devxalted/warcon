@@ -41,9 +41,10 @@ const MATRIX: Record<string, Policy> = {
 	'orgs/[id]/reserved/+page.server.ts': 'lists',
 	'orgs/[id]/players/+page.server.ts': 'lists',
 	'server/[id]/+layout.server.ts': 'cap:server.view',
-	'server/[id]/automation/+page.server.ts': 'cap:automation.manage',
+	'server/[id]/automation/+page.server.ts': 'hidden:automation.read',
+	'server/[id]/config/+page.server.ts': 'hidden:config.read',
 	'server/[id]/bans/+page.server.ts': 'cap:server.view',
-	'server/[id]/slots/+page.server.ts': 'cap:server.view',
+	'server/[id]/slots/+page.server.ts': 'hidden:slots.read',
 	'server/[id]/settings/+page.server.ts': 'cap:server.view',
 	'server/[id]/players/[steamId]/+page.server.ts': 'cap:server.view'
 };

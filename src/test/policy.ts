@@ -20,7 +20,8 @@ export type Policy =
 	| 'lists' // an org owner, or lists.edit on any server of the org
 	| 'listsOwner' // an org owner, among those who can open the lists
 	| 'manager' // an owner of the server's org (or the site owner); never a key
-	| `cap:${Capability}`; // the capability on this server
+	| `cap:${Capability}` // the capability on this server
+	| `hidden:${Capability}`; // the capability, answered 404 rather than 403 (tab-guard.ts)
 
 const ALL: readonly Capability[] = CAPABILITIES;
 
@@ -71,10 +72,14 @@ export function expected(policy: Policy, who: PrincipalName): Expect {
 			if (KEYS.includes(who)) return 403;
 			return CAPS[who] ? 403 : 404;
 		default: {
-			const cap = policy.slice('cap:'.length) as Capability;
+			// `hidden:` is `cap:` that will not admit the thing exists: someone who can see the
+			// server but lacks the capability gets the same 404 as someone who cannot see the
+			// server, so the tab's existence is not itself readable. See tab-guard.ts.
+			const hides = policy.startsWith('hidden:');
+			const cap = policy.slice(hides ? 'hidden:'.length : 'cap:'.length) as Capability;
 			const held = CAPS[who];
 			if (!held) return 404;
-			return held.includes(cap) ? 'ok' : 403;
+			return held.includes(cap) ? 'ok' : hides ? 404 : 403;
 		}
 	}
 }
