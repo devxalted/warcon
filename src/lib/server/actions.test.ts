@@ -162,6 +162,8 @@ function reservedClient(opts: {
 	writable?: boolean;
 	conflicts?: number;
 	routeError?: InstanceType<typeof GameError>;
+	/** what GET /v1/reserved-slots answers (the live builds serve the read without the writes) */
+	live?: string[];
 }) {
 	const calls: string[] = [];
 	let text = opts.text;
@@ -171,6 +173,7 @@ function reservedClient(opts: {
 		json: async (method: string, path: string) => {
 			calls.push(`${method} ${path}`);
 			if (path.startsWith('/v1/reserved-slots')) {
+				if (method === 'GET' && opts.live) return { reservedSlots: opts.live };
 				if (opts.routeError) throw opts.routeError;
 				if (!opts.route)
 					throw new GameError(404, 'This server build does not serve it.', 'no_route');
@@ -225,9 +228,16 @@ test('reservedAdd falls back to the document on no_route and writes only that ke
 		text: `${SESSION}\r\nServerName=x\r\nMaxReservedSlots=5\r\n!DefaultReservedPlayerIds=ClearArray\r\n.DefaultReservedPlayerIds=76561198000000001\r\n`
 	});
 	const r: any = await ACTIONS.reservedAdd.run(f.client, { steamId: ID });
-	expect(f.calls).toEqual(['POST /v1/reserved-slots', 'GET /v1/config', 'PUT /v1/config r1']);
+	expect(f.calls).toEqual([
+		'POST /v1/reserved-slots',
+		'GET /v1/config',
+		'PUT /v1/config r1',
+		'GET /v1/reserved-slots'
+	]);
 	expect(r.via).toBe('config');
 	expect(r.revision).toBe('r2');
+	// no read route either: nothing to compare the document against
+	expect(r.pendingRestart).toBe(false);
 	expect(r.message).toContain(ID);
 	expect(f.text()).toBe(
 		`${SESSION}\r\nServerName=x\r\nMaxReservedSlots=5\r\n!DefaultReservedPlayerIds=ClearArray\r\n.DefaultReservedPlayerIds=76561198000000001\r\n.DefaultReservedPlayerIds=${ID}\r\n`
@@ -240,12 +250,54 @@ test('viaConfig skips the live route; reservedRemove drops the id', async () => 
 		text: `${SESSION}\n!DefaultReservedPlayerIds=ClearArray\n.DefaultReservedPlayerIds=${ID}\n`
 	});
 	const r: any = await ACTIONS.reservedRemove.run(f.client, { steamId: ID, viaConfig: true });
-	expect(f.calls).toEqual(['GET /v1/config', 'PUT /v1/config r1']);
+	expect(f.calls).toEqual(['GET /v1/config', 'PUT /v1/config r1', 'GET /v1/reserved-slots']);
 	expect(r.via).toBe('config');
 	expect(f.text()).toBe(`${SESSION}\n!DefaultReservedPlayerIds=ClearArray\n`);
 });
 
-test('the document path reports present, absent and full with the codes the sync expects', async () => {
+// Seen on a real CL-501228 server 2026-09-15: the document edit lands, but the running server
+// keeps the list it loaded at start, so GET /v1/reserved-slots still lists a withdrawn id.
+test('a document edit the running server has not taken up is reported as pending a restart', async () => {
+	let f = reservedClient({
+		route: false,
+		live: [ID],
+		text: `${SESSION}\n!DefaultReservedPlayerIds=ClearArray\n.DefaultReservedPlayerIds=${ID}\n`
+	});
+	let r: any = await ACTIONS.reservedRemove.run(f.client, { steamId: ID, viaConfig: true });
+	expect(f.text()).toBe(`${SESSION}\n!DefaultReservedPlayerIds=ClearArray\n`);
+	expect(r.pendingRestart).toBe(true);
+	expect(r.message).toMatch(/keeps it until it restarts/);
+
+	f = reservedClient({ route: false, live: [], text: `${SESSION}\n` });
+	r = await ACTIONS.reservedAdd.run(f.client, { steamId: ID, viaConfig: true });
+	expect(r.pendingRestart).toBe(true);
+	expect(r.message).toMatch(/when it restarts/);
+
+	// the running list agrees with the document: nothing pending
+	f = reservedClient({
+		route: false,
+		live: [],
+		text: `${SESSION}\n.DefaultReservedPlayerIds=${ID}\n`
+	});
+	r = await ACTIONS.reservedRemove.run(f.client, { steamId: ID, viaConfig: true });
+	expect(r.pendingRestart).toBe(false);
+	expect(r.message).toBe(`Removed the reserved slot for ${ID}.`);
+});
+
+test('the reserved read returns the document list beside the live one when asked', async () => {
+	const f = reservedClient({
+		route: false,
+		live: [ID],
+		text: `${SESSION}\n.DefaultReservedPlayerIds=76561198000000002\n`
+	});
+	expect(await ACTIONS.reserved.run(f.client, {})).toEqual({ reserved: [ID] });
+	expect(await ACTIONS.reserved.run(f.client, { document: '1' })).toEqual({
+		reserved: [ID],
+		document: ['76561198000000002']
+	});
+});
+
+test('the document path reports present and absent with the codes the sync expects', async () => {
 	const two = `${SESSION}\nMaxReservedSlots=2\n.DefaultReservedPlayerIds=${ID}\n.DefaultReservedPlayerIds=76561198000000002\n`;
 	let f = reservedClient({ route: false, text: two });
 	await expect(ACTIONS.reservedAdd.run(f.client, { steamId: ID })).rejects.toMatchObject({
@@ -254,21 +306,22 @@ test('the document path reports present, absent and full with the codes the sync
 	});
 	expect(f.calls.filter((c) => c.startsWith('PUT'))).toEqual([]);
 
-	f = reservedClient({ route: false, text: two });
-	await expect(
-		ACTIONS.reservedAdd.run(f.client, { steamId: '76561198000000003' })
-	).rejects.toMatchObject({ status: 409, code: 'reserved_full' });
-	expect(f.calls.filter((c) => c.startsWith('PUT'))).toEqual([]);
-
 	f = reservedClient({ route: false, text: `${SESSION}\n` });
 	await expect(
 		ACTIONS.reservedRemove.run(f.client, { steamId: ID, viaConfig: true })
 	).rejects.toMatchObject({ status: 404, code: 'reserved_not_found' });
+});
 
-	// No MaxReservedSlots key: no cap is applied.
-	f = reservedClient({ route: false, text: `${SESSION}\n.DefaultReservedPlayerIds=1\n` });
-	const r: any = await ACTIONS.reservedAdd.run(f.client, { steamId: ID, viaConfig: true });
+test('MaxReservedSlots never limits the list: a third id goes in beside two held slots', async () => {
+	const two = `${SESSION}\nMaxReservedSlots=2\n.DefaultReservedPlayerIds=${ID}\n.DefaultReservedPlayerIds=76561198000000002\n`;
+	const f = reservedClient({ route: false, text: two });
+	const r: any = await ACTIONS.reservedAdd.run(f.client, {
+		steamId: '76561198000000003',
+		viaConfig: true
+	});
 	expect(r.via).toBe('config');
+	expect(f.text()).toContain('.DefaultReservedPlayerIds=76561198000000003');
+	expect(f.text()).toContain('MaxReservedSlots=2');
 });
 
 test('a revision conflict is retried once with the fresh revision, then reported as 412', async () => {
@@ -278,7 +331,8 @@ test('a revision conflict is retried once with the fresh revision, then reported
 		'GET /v1/config',
 		'PUT /v1/config r1',
 		'GET /v1/config',
-		'PUT /v1/config r2'
+		'PUT /v1/config r2',
+		'GET /v1/reserved-slots'
 	]);
 	expect(r.revision).toBe('r3');
 
@@ -402,4 +456,181 @@ test('a refused PUT is classified (a missing route stays no_route) and carries n
 		.catch((e) => e);
 	expect(conflict.code).toBe('revision_conflict');
 	expect(conflict.body).toBeNull();
+});
+
+// The document carries the RCON password. It leaves the panel without it, for every role, and
+// comes back with it: whoever holds the password runs the server without the panel.
+const RCON = '[/Script/WDRCON.WDRCONSettings]';
+const WITH_SECRETS = `${SESSION}\r\nServerName=x\r\n!DefaultReservedPlayerIds=ClearArray\r\n\r\n${RCON}\r\nPassword=hunter2\r\n\r\n[WDServerFeed]\r\nToken=wcf_abc\r\n`;
+
+test('config hides the RCON password and the feed token from whoever reads it', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS });
+	const r: any = await ACTIONS.config.run(f.client, {});
+	expect(r.text).not.toContain('hunter2');
+	expect(r.text).not.toContain('wcf_abc');
+	expect(r.text).toContain('Password=(hidden)');
+	expect(r.text).toContain('ServerName=x');
+	expect(r.revision).toBe('r1');
+});
+
+test('configApply puts the live credentials back where the placeholder was left alone', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS });
+	const shown = ((await ACTIONS.config.run(f.client, {})) as any).text as string;
+	await ACTIONS.configApply.run(f.client, {
+		text: shown.replace('ServerName=x', 'ServerName=y'),
+		revision: 'r1'
+	});
+	expect(f.text()).toBe(WITH_SECRETS.replace('ServerName=x', 'ServerName=y'));
+	// A typed password is the caller's, and a document without placeholders costs no extra read.
+	f.calls.length = 0;
+	await ACTIONS.configApply.run(f.client, {
+		text: WITH_SECRETS.replace('hunter2', 'rotated'),
+		revision: 'r2'
+	});
+	expect(f.calls).toEqual(['PUT /v1/config r2']);
+	expect(f.text()).toContain('Password=rotated');
+});
+
+test('configValidate checks the document the server would get, not the placeholders', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS });
+	const shown = ((await ACTIONS.config.run(f.client, {})) as any).text as string;
+	let validated = '';
+	f.client.configCall = async (_m: string, _p: string, body: string) => {
+		validated = body;
+		return { status: 200, body: { ok: true } };
+	};
+	await ACTIONS.configValidate.run(f.client, { text: shown });
+	expect(validated).toBe(WITH_SECRETS);
+});
+
+test('what the game says about a document never quotes a credential back', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS });
+	const shown = ((await ACTIONS.config.run(f.client, {})) as any).text as string;
+	// A build that echoes lines: nothing documented does, and nothing says one never will.
+	const echo = {
+		ok: true,
+		changed: [{ key: 'Password', from: 'hunter2', to: 'hunter2' }],
+		warnings: ['line 7: Password=hunter2 is short', 'Token=wcf_abc unused']
+	};
+	f.client.configCall = async () => ({ status: 200, body: echo });
+	for (const action of [ACTIONS.configValidate, ACTIONS.configApply]) {
+		const told = JSON.stringify(await action.run(f.client, { text: shown, revision: 'r1' }));
+		expect(told).not.toContain('hunter2');
+		expect(told).not.toContain('wcf_abc');
+		expect(told).toContain('Password=(hidden) is short');
+	}
+	// A refused apply carries the game's answer as the error's body, and a conflict names the
+	// live side, which may be a password this document never held.
+	f.client.configCall = async () => ({
+		status: 400,
+		body: { ok: false, error: { message: 'bad line: Password=hunter2' }, errors: ['hunter2'] }
+	});
+	const refused: any = await ACTIONS.configApply
+		.run(f.client, { text: shown, revision: 'r1' })
+		.catch((e) => e);
+	expect(refused.message).not.toContain('hunter2');
+	expect(JSON.stringify(refused.body)).not.toContain('hunter2');
+	f.client.configCall = async () => ({
+		status: 412,
+		body: { conflict: [{ line: 'Password=hunter2' }] }
+	});
+	const conflict = await ACTIONS.configApply.run(f.client, {
+		text: WITH_SECRETS.replace('hunter2', 'typed-by-me'),
+		revision: 'r0'
+	});
+	expect(JSON.stringify(conflict)).not.toContain('hunter2');
+});
+
+test('a reserved slot the document refuses says so without quoting a credential', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS, live: [] });
+	f.client.configCall = async () => ({
+		status: 400,
+		body: { error: { code: 'invalid', message: 'bad line: Password=hunter2' } }
+	});
+	const refused: any = await ACTIONS.reservedAdd.run(f.client, { steamId: ID }).catch((e) => e);
+	expect(refused.message).toBe('bad line: Password=(hidden)');
+	expect(refused.body).toBeNull();
+});
+
+test('a placeholder the server has no value for is refused before anything is written', async () => {
+	const f = reservedClient({ route: false, text: `${SESSION}\r\nServerName=x\r\n` });
+	await expect(
+		ACTIONS.configApply.run(f.client, { text: `${RCON}\r\nPassword=(hidden)\r\n`, revision: 'r1' })
+	).rejects.toMatchObject({ status: 400, code: 'hidden_value' });
+	expect(f.calls).toEqual(['GET /v1/config']);
+});
+
+test('a reserved slot written through the document keeps the real password in the file', async () => {
+	const f = reservedClient({ route: false, text: WITH_SECRETS, live: [] });
+	await ACTIONS.reservedAdd.run(f.client, { steamId: ID });
+	expect(f.text()).toContain('Password=hunter2');
+	expect(f.text()).toContain('Token=wcf_abc');
+	expect(f.text()).toContain(ID);
+});
+
+test('raw does not serve the config document, however the path is spelt', async () => {
+	const calls: string[] = [];
+	const client: any = {
+		raw: async (method: string, path: string) => {
+			calls.push(`${method} ${path}`);
+			return { status: 200, statusText: 'OK', headers: {}, text: '{}' };
+		}
+	};
+	for (const path of [
+		'/v1/config',
+		'/v1/config?x=1',
+		'/v1/Config',
+		'/v1/config.',
+		'/v1/config/validate'
+	])
+		await expect(ACTIONS.raw.run(client, { method: 'GET', path })).rejects.toMatchObject({
+			status: 403,
+			code: 'use_config_actions'
+		});
+	for (const path of ['/v1/audit', '/v1/audit?limit=500', '/v1/AUDIT.'])
+		await expect(ACTIONS.raw.run(client, { method: 'GET', path })).rejects.toMatchObject({
+			status: 403,
+			code: 'use_server_log'
+		});
+	// A listener that reads an escape, a ';' or a second layer of encoding its own way would serve
+	// the document for these, so a route with anything but plain characters is not sent at all.
+	for (const path of [
+		'/v1/%63onfig',
+		'/v1/%61udit',
+		'/v1/config%3Fx',
+		'/v1/config%23x',
+		'/v1/config;x',
+		'/v1/config%20',
+		'/v1/config%00',
+		'/v1/config%5c',
+		'/v1/%2563onfig',
+		'/v1/%63onfig/%ZZ'
+	])
+		await expect(ACTIONS.raw.run(client, { method: 'GET', path })).rejects.toMatchObject({
+			status: 400
+		});
+	expect(calls).toEqual([]);
+	await ACTIONS.raw.run(client, { method: 'GET', path: '/v1/configuration' });
+	await ACTIONS.raw.run(client, { method: 'GET', path: '/v1/status' });
+	await ACTIONS.raw.run(client, { method: 'GET', path: '/v1/players?name=a%20b' });
+	expect(calls).toEqual(['GET /v1/configuration', 'GET /v1/status', 'GET /v1/players?name=a%20b']);
+});
+
+test('raw passes on the documented headers only: a proxy in front of the listener names the RCON address in the others', async () => {
+	const client: any = {
+		raw: async () => ({
+			status: 301,
+			statusText: 'Moved',
+			headers: {
+				'content-type': 'text/html',
+				etag: '"abc"',
+				location: 'https://rcon.example.net:7776/v1/status/',
+				via: '1.1 rcon.example.net',
+				'alt-svc': 'h3="rcon.example.net:7776"'
+			},
+			text: ''
+		})
+	};
+	const res: any = await ACTIONS.raw.run(client, { method: 'GET', path: '/v1/status' });
+	expect(res.headers).toEqual({ 'content-type': 'text/html', etag: '"abc"' });
 });

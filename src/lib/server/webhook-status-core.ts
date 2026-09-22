@@ -9,7 +9,10 @@ import { resolve } from 'node:path';
 import type { FactionScore, LiveView, Player } from '$lib/types';
 import { factionColor, fmtDuration, isMod, mapName, prettify, zoneLabel } from '$lib/format';
 import { mapArtCandidates } from '$lib/map-art';
+import { RESTART_AFTER_HOURS, restartWindow } from '$lib/uptime';
+import { scoreCapOf } from '$lib/match';
 import type { StatusStyle } from '$lib/status-styles';
+import type { FeatureSet } from '$lib/features';
 import type { DiscordPayload, Embed, EmbedField } from './webhook-delivery';
 
 export interface StatusServer {
@@ -25,6 +28,61 @@ export interface StatusOptions {
 	now: number;
 	/** banner unless told otherwise; see $lib/status-styles */
 	style?: StatusStyle;
+	/** the title points at the first; the rest follow as a line under the body; none = no link */
+	links?: CardLink[];
+}
+
+export interface CardLink {
+	label: string;
+	url: string;
+}
+/** The webhook's three switches for what the card links to. */
+export interface LinkFlags {
+	linkStatus: boolean;
+	linkLeaderboard: boolean;
+	linkPanel: boolean;
+}
+
+/** Seconds between edits of one card: the floor, the ceiling and what a new webhook gets. */
+export const STATUS_INTERVAL = { min: 30, max: 300, default: 60 } as const;
+
+/** A requested interval as seconds inside the bounds; anything unreadable is the default. */
+export function clampInterval(v: unknown): number {
+	if (v === undefined || v === null || v === '') return STATUS_INTERVAL.default;
+	const n = Number(v);
+	if (!Number.isFinite(n)) return STATUS_INTERVAL.default;
+	return Math.min(STATUS_INTERVAL.max, Math.max(STATUS_INTERVAL.min, Math.round(n)));
+}
+
+/**
+ * The links a card carries, in order: a public page only while it is on for the server (a
+ * link into the sign-in wall helps nobody), the panel whenever asked for.
+ */
+export function cardLinks(
+	origin: string,
+	serverId: string,
+	flags: LinkFlags,
+	features: FeatureSet
+): CardLink[] {
+	const id = encodeURIComponent(serverId);
+	const out: CardLink[] = [];
+	if (flags.linkStatus && features.status)
+		out.push({ label: 'Live status', url: `${origin}/s/${id}` });
+	if (flags.linkLeaderboard && features.leaderboards)
+		out.push({ label: 'Leaderboard', url: `${origin}/s/${id}/leaderboard` });
+	if (flags.linkPanel) out.push({ label: 'Panel', url: `${origin}/server/${id}` });
+	return out;
+}
+
+/** The title points at the first link; the others join the body as a last line. */
+function applyLinks(e: Embed, links: CardLink[]): Embed {
+	const { url: _url, ...rest } = e;
+	void _url;
+	const more = links.slice(1);
+	if (!more.length) return links.length ? { ...rest, url: links[0].url } : rest;
+	const line = more.map((l) => `[${l.label}](${l.url})`).join(' · ');
+	const body = clip(e.description ?? '', LIMITS.description - line.length - 1);
+	return { ...rest, url: links[0].url, description: body ? `${body}\n${line}` : line };
 }
 
 /** Discord's limits: per field value, per description, and across one message. */
@@ -170,7 +228,8 @@ export function embedLength(e: Embed): number {
 
 /** Trims the longest field, a line at a time, until the whole embed fits one message. */
 export function fitEmbed(e: Embed): Embed {
-	let fields = e.fields ?? [];
+	if (!e.fields) return e;
+	let fields = e.fields;
 	while (embedLength({ ...e, fields }) > LIMITS.message) {
 		const longest = fields.reduce((a, f) => (f.value.length > a.value.length ? f : a), fields[0]);
 		if (!longest || longest.value.length < 40) break;
@@ -186,10 +245,13 @@ export function buildStatusEmbed(
 	server: StatusServer,
 	live: LiveView | null
 ): Embed {
+	return fitEmbed(applyLinks(buildBody(opts, server, live), opts.links ?? []));
+}
+
+function buildBody(opts: StatusOptions, server: StatusServer, live: LiveView | null): Embed {
 	const https = opts.origin.startsWith('https://');
 	const base: Embed = {
 		title: clip(server.name, 200),
-		url: `${opts.origin}/server/${server.id}`,
 		description: '',
 		color: COLORS.empty,
 		timestamp: new Date(opts.now).toISOString(),
@@ -238,7 +300,9 @@ export function buildStatusEmbed(
 			? COLORS.busy
 			: COLORS.empty;
 	const filled = s.maxPlayers > 0 ? Math.round((s.playerCount / s.maxPlayers) * PLAYER_BAR) : 0;
-	const online = `${busy ? '🟢' : '⚪'} **${s.playerCount} / ${s.maxPlayers}** online  ${bar(Math.min(PLAYER_BAR, Math.max(0, filled)), PLAYER_BAR, '▰', '▱')}`;
+	// The server's cap is its public slots; MaxReservedSlots holds more back for reserved players.
+	const held = live.reservedSlots ? ` +${live.reservedSlots} reserved` : '';
+	const online = `${busy ? '🟢' : '⚪'} **${s.playerCount} / ${s.maxPlayers}**${held} online  ${bar(Math.min(PLAYER_BAR, Math.max(0, filled)), PLAYER_BAR, '▰', '▱')}`;
 	const zone = zoneLabel(s.alternator);
 	const where = [
 		`**${mapName(s.map)}**`,
@@ -248,9 +312,10 @@ export function buildStatusEmbed(
 	]
 		.filter(Boolean)
 		.join(' · ');
-	const scale = s.scoreCap || Math.max(1, ...s.scores.map((f) => f.score));
+	// Live builds send no cap; the game's default keeps the bars on the same scale as the overview.
+	const cap = scoreCapOf(s);
 	const scoreRows = ranked.map(({ f, i }) => {
-		const n = Math.min(SCORE_BAR, Math.max(0, Math.round((f.score / scale) * SCORE_BAR)));
+		const n = Math.min(SCORE_BAR, Math.max(0, Math.round((f.score / cap) * SCORE_BAR)));
 		return `${bar(n, SCORE_BAR, squareFor(f.colorHex, f.name, i), '⬛')} **${f.score}** ${escapeMarkdown(f.name)}`;
 	});
 	const scoreLine = ranked
@@ -260,17 +325,20 @@ export function buildStatusEmbed(
 		.join(' · ');
 	// Cap and clock belong to a match, which the scores say exists.
 	const match = s.scores.length
-		? [
-				s.scoreCap ? `First to ${s.scoreCap}` : null,
-				s.matchSeconds === null ? null : `${fmtDuration(s.matchSeconds)} played`
-			]
+		? [`First to ${cap}`, s.matchSeconds === null ? null : `${fmtDuration(s.matchSeconds)} played`]
 				.filter(Boolean)
 				.join(' · ')
 		: '';
 	const observedAt = live.observedAt;
+	// Discord renders "9 hours ago" itself, so the uptime line needs no edit to stay right; the
+	// restart note flips once, when the threshold passes.
+	const restart = restartWindow(live.startedAt, RESTART_AFTER_HOURS, opts.now);
+	const upLine = restart
+		? `Up since ${relative(live.startedAt!)}${restart.due ? ' · 🔁 Restarts after this round' : ''}\n`
+		: '';
 	const stamp = (prefix = '') => ({
 		name: '\u200b',
-		value: `${prefix}Updated ${relative(observedAt)}`
+		value: `${upLine}${prefix}Updated ${relative(observedAt)}`
 	});
 	const players = live.players;
 	const thumb = art('square');
@@ -340,15 +408,18 @@ export function buildStatusEmbed(
 }
 
 /** What an edit is for: everything shown except the clocks. */
-function substance(server: StatusServer, live: LiveView | null): unknown {
+function substance(server: StatusServer, live: LiveView | null, now: number): unknown {
 	if (!live || !live.observedAt) return [server.id, server.name, 'waiting'];
 	if (!live.ok || !live.status)
 		return [server.id, server.name, 'down', live.error, live.gameServerId];
 	const s = live.status;
+	const restart = restartWindow(live.startedAt, RESTART_AFTER_HOURS, now);
 	return [
 		server.id,
 		server.name,
 		live.gameServerId,
+		// the start time itself (a restart is a new card), and whether the restart note shows
+		restart ? [live.startedAt, restart.due] : null,
 		s.playerCount,
 		s.maxPlayers,
 		s.map,
@@ -374,6 +445,10 @@ export function statusMessage(
 ): StatusMessage {
 	return {
 		payload: { content: '', embeds: [buildStatusEmbed(opts, server, live)] },
-		key: JSON.stringify([opts.style ?? 'banner', substance(server, live)])
+		key: JSON.stringify([
+			opts.style ?? 'banner',
+			(opts.links ?? []).map((l) => l.url),
+			substance(server, live, opts.now)
+		])
 	};
 }

@@ -17,6 +17,11 @@ import { isOwner, LostOwnership, withOwnedTransaction } from './leadership';
 import { settings } from './settings';
 import { recordDelivery, type Intent, type TriggerUpdate } from './triggers';
 import { memoryOf } from './observe';
+import { grantEntry, listOf, serverListOf } from './lists';
+import { getOrg, getServer } from './access';
+import { gateway } from './gateway';
+import { deliveries } from './metrics';
+import { NAME_FLAG } from './name-filter';
 import type { OutboxView } from '$lib/types';
 
 const CLAIM_LIMIT = 50;
@@ -153,6 +158,9 @@ function skipReason(row: OutboxRow, m: ReturnType<typeof memoryOf>): string | nu
 class Skipped extends Error {}
 
 async function deliverOne(env: Env, row: OutboxRow): Promise<void> {
+	if (row.action === 'seed_reward') return deliverSeedReward(env, row);
+	// An alert-only Name filter match: the audit row (and its Discord card) is the whole delivery.
+	if (row.action === NAME_FLAG) return finish(env, row, 'delivered', row.okMessage);
 	const early = skipReason(row, memoryOf(row.serverId));
 	if (early) return finish(env, row, 'skipped', early);
 	stats.inFlight++;
@@ -182,6 +190,69 @@ async function deliverOne(env: Env, row: OutboxRow): Promise<void> {
 		else if (err instanceof GameError || err instanceof ApiError)
 			await finish(env, row, 'failed', err.message);
 		else await finish(env, row, 'failed', err instanceof Error ? err.message : String(err));
+	} finally {
+		stats.inFlight--;
+	}
+}
+
+/**
+ * A Seeding reward is a panel action, not a game request: the player goes on the server's own
+ * reserved list, or the organisation's, for the rule's number of days from now. The seeded
+ * server is nudged to sync at once; with an org-wide slot the org's other servers pick the entry
+ * up on their own next sync, as they would an expiry, so a burst of grants is never a burst of
+ * fan-outs across the org. Earned slots do not go stale, so the age cut-off does not apply, and
+ * the grant needs no server memory (the roster may still be loading after a start).
+ */
+async function deliverSeedReward(env: Env, row: OutboxRow): Promise<void> {
+	const p = row.params as {
+		steamId: string;
+		name: string;
+		reason: string;
+		slotDays: number;
+		/** missing on rows from before the rule had a scope: those went org-wide */
+		scope?: 'server' | 'org';
+	};
+	stats.inFlight++;
+	try {
+		if (!isOwner()) throw new LostOwnership();
+		const m = memoryOf(row.serverId);
+		const server = m?.server ?? (await getServer(env, row.serverId));
+		const org = m?.org ?? (server ? await getOrg(env, server.orgId) : null);
+		if (!server || !org) return await finish(env, row, 'skipped', 'Server no longer exists.');
+		const here = p.scope === 'server';
+		const list = here
+			? await serverListOf(env, server, 'reserve')
+			: await listOf(env, org.id, 'reserve');
+		const expiresAt = new Date(Date.now() + p.slotDays * 86400_000);
+		const { added } = await grantEntry(env, list, {
+			steamId: p.steamId,
+			reason: p.reason,
+			expiresAt,
+			addedByName: `trigger: ${row.triggerName}`
+		});
+		// The next sync puts the slot on the server; remember it now so the rule does not grant
+		// it again before the next snapshot.
+		m?.reserved.add(p.steamId);
+		if (!added)
+			return await finish(
+				env,
+				row,
+				'skipped',
+				`${p.steamId} already has a reserved slot ${here ? `on ${server.name}` : `in ${org.name}`}.`
+			);
+		if (m) {
+			m.syncAt = 0;
+			gateway().observeSoon(row.serverId, { lists: true });
+		}
+		await finish(
+			env,
+			row,
+			'delivered',
+			`Reserved a slot for ${p.name} until ${expiresAt.toISOString().slice(0, 10)}.`
+		);
+	} catch (err) {
+		if (err instanceof LostOwnership) return; // the lease sweep marks it unknown
+		await finish(env, row, 'failed', err instanceof Error ? err.message : String(err));
 	} finally {
 		stats.inFlight--;
 	}
@@ -223,6 +294,7 @@ async function execute(client: WardogsClient, row: OutboxRow): Promise<unknown> 
 
 async function finish(env: Env, row: OutboxRow, state: Outcome, outcome: string): Promise<void> {
 	stats[state]++;
+	deliveries.inc({ outcome: state });
 	try {
 		await withOwnedTransaction(env, (tx) =>
 			tx
@@ -234,12 +306,15 @@ async function finish(env: Env, row: OutboxRow, state: Outcome, outcome: string)
 		if (err instanceof LostOwnership) throw err;
 		console.error('[warcon] outbox update', err);
 	}
-	const m = memoryOf(row.serverId);
-	if (m && state !== 'skipped')
+	// A grant can be delivered before the roster is in memory: audit it from the server row then.
+	const server =
+		memoryOf(row.serverId)?.server ??
+		(row.action === 'seed_reward' ? await getServer(env, row.serverId) : null);
+	if (server && state !== 'skipped')
 		await recordDelivery(
 			env,
 			row,
-			{ id: m.server.id, name: m.server.name, orgId: m.server.orgId },
+			{ id: server.id, name: server.name, orgId: server.orgId },
 			row.target,
 			state === 'delivered' ? 'ok' : 'error',
 			outcome,

@@ -8,6 +8,8 @@
 	import RoleBadge from '$lib/components/RoleBadge.svelte';
 	import GrantList from '$lib/components/GrantList.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import SortHeader from '$lib/components/SortHeader.svelte';
+	import { TableSort, matches } from '$lib/table.svelte';
 	import type { UserView } from '$lib/types';
 	import type { PageProps } from './$types';
 
@@ -25,9 +27,33 @@
 				mustChange: boolean;
 		  }
 		| { kind: 'grants'; user: UserView; grants: Record<string, string> }
-		| { kind: 'reset'; user: UserView; password: string; mustChange: boolean };
+		| {
+				kind: 'reset';
+				user: UserView;
+				password: string;
+				mustChange: boolean;
+				/** lost device: also drop their authenticator app, passkeys and recovery key */
+				resetAuth: boolean;
+		  };
 	let dialog = $state<Dialog | null>(null);
 	let busy = $state(false);
+
+	let search = $state('');
+	const status = (u: UserView) => (u.disabled ? 2 : u.mustChangePassword ? 1 : 0);
+	const sort = new TableSort<UserView>({
+		user: { by: (u) => u.name || u.username },
+		role: { by: (u) => u.role },
+		status: { by: status },
+		signIn: { by: (u) => (u.authComplete ? 1 : 0) },
+		orgs: { by: (u) => u.orgs.length, dir: 'desc' },
+		access: { by: (u) => (u.role === 'owner' ? Infinity : u.grants.length), dir: 'desc' },
+		lastLogin: { by: (u) => u.lastLoginAt, dir: 'desc' }
+	});
+	let rows = $derived(
+		sort.sorted(
+			data.users.filter((u) => matches(search, u.name, u.username, ...u.orgs.map((o) => o.orgName)))
+		)
+	);
 
 	const openEdit = (u: UserView | null) => {
 		dialog = {
@@ -54,7 +80,7 @@
 		dialog = { kind: 'grants', user: u, grants };
 	};
 	const openReset = (u: UserView) => {
-		dialog = { kind: 'reset', user: u, password: '', mustChange: true };
+		dialog = { kind: 'reset', user: u, password: '', mustChange: true, resetAuth: false };
 	};
 
 	async function run(fn: () => Promise<void>, done: string) {
@@ -115,9 +141,10 @@
 			() =>
 				api('PATCH', `/api/users/${d.user.id}`, {
 					password: d.password,
-					mustChangePassword: d.mustChange
+					mustChangePassword: d.mustChange,
+					resetAuth: d.resetAuth
 				}),
-			'Password reset.'
+			d.resetAuth ? 'Sign-in methods reset.' : 'Password reset.'
 		);
 	}
 	async function remove(u: UserView) {
@@ -132,10 +159,9 @@
 	}
 </script>
 
-<svelte:head><title>Users · {data.appName}</title></svelte:head>
+<svelte:head><title>Users · Admin · {data.appName}</title></svelte:head>
 
-<div class="mb-5 flex items-center gap-3">
-	<h1 class="text-xl font-semibold tracking-tight">Users &amp; access</h1>
+<div class="mb-4 flex items-center gap-3">
 	<button class="ml-auto btn btn-primary" onclick={() => openEdit(null)}>Add user</button>
 </div>
 
@@ -150,17 +176,38 @@
 	its organisation.
 </div>
 
+<div class="mb-3 flex flex-wrap items-center gap-2">
+	<input
+		class="input w-full sm:w-80"
+		type="search"
+		placeholder="Filter by name, username, organisation…"
+		aria-label="Filter users"
+		bind:value={search}
+	/>
+	<span class="text-[12.5px] text-mist-600"
+		>{rows.length === data.users.length ? '' : `${rows.length} of `}{data.users.length} user{data
+			.users.length === 1
+			? ''
+			: 's'}</span
+	>
+</div>
+
 <div class="table-wrap">
 	<table>
-		<thead
-			><tr
-				><th>User</th><th>Role</th><th>Status</th><th>Organisations</th><th>Server access</th><th
-					>Last login</th
-				><th></th></tr
-			></thead
-		>
+		<thead>
+			<tr>
+				<SortHeader {sort} key="user">User</SortHeader>
+				<SortHeader {sort} key="role">Role</SortHeader>
+				<SortHeader {sort} key="status">Status</SortHeader>
+				<SortHeader {sort} key="signIn">Sign-in</SortHeader>
+				<SortHeader {sort} key="orgs">Organisations</SortHeader>
+				<SortHeader {sort} key="access">Server access</SortHeader>
+				<SortHeader {sort} key="lastLogin">Last login</SortHeader>
+				<th></th>
+			</tr>
+		</thead>
 		<tbody>
-			{#each data.users as u (u.id)}
+			{#each rows as u (u.id)}
 				<tr>
 					<td>
 						<div>{u.name || u.username}</div>
@@ -171,6 +218,14 @@
 						{#if u.disabled}<Badge tone="err">disabled</Badge>{:else if u.mustChangePassword}<Badge
 								tone="info">must change pw</Badge
 							>{:else}<Badge tone="ok">active</Badge>{/if}
+					</td>
+					<td>
+						<div class="flex flex-wrap items-center gap-1.5 text-[12px] text-mist-400">
+							{#if u.signIn.length}{u.signIn.join(' · ')}{:else}<span class="text-mist-600"
+									>none</span
+								>{/if}
+							{#if !u.authComplete}<Badge tone="warn">incomplete</Badge>{/if}
+						</div>
 					</td>
 					<td>
 						{#if u.orgs.length}
@@ -214,7 +269,7 @@
 							{#if u.role !== 'owner'}<button class="btn btn-sm" onclick={() => openGrants(u)}
 									>Access</button
 								>{/if}
-							<button class="btn btn-sm" onclick={() => openReset(u)}>Reset PW</button>
+							<button class="btn btn-sm" onclick={() => openReset(u)}>Reset sign-in</button>
 							{#if u.id !== data.user.id}<button
 									class="btn btn-sm btn-danger"
 									onclick={() => remove(u)}>Delete</button
@@ -222,6 +277,8 @@
 						</span>
 					</td>
 				</tr>
+			{:else}
+				<tr><td colspan="7" class="py-6 text-center text-mist-600">Nobody matches.</td></tr>
 			{/each}
 		</tbody>
 	</table>
@@ -311,7 +368,7 @@
 	</Modal>
 {:else if dialog?.kind === 'reset'}
 	{@const d = dialog}
-	<Modal title="Reset password for @{d.user.username}" onclose={() => (dialog = null)}>
+	<Modal title="Reset sign-in for @{d.user.username}" onclose={() => (dialog = null)}>
 		<form
 			class="space-y-3"
 			onsubmit={(e) => {
@@ -332,7 +389,14 @@
 			<label class="inline-flex items-center gap-2 text-[13px]"
 				><input type="checkbox" bind:checked={d.mustChange} /> Require a new password at next sign-in</label
 			>
-			<p class="note">All of their sessions are signed out.</p>
+			<label class="flex items-start gap-2 text-[13px]"
+				><input type="checkbox" class="mt-0.5" bind:checked={d.resetAuth} />
+				<span
+					>Lost device: also remove their authenticator app, every passkey and their recovery key.
+					Linked Discord and Steam accounts stay.</span
+				></label
+			>
+			<p class="note">All of their sessions are signed out. Tell them the password another way.</p>
 			<div class="flex justify-end gap-2 pt-2">
 				<button type="button" class="btn" data-close onclick={() => (dialog = null)}>Cancel</button>
 				<button type="submit" class="btn btn-primary" disabled={busy}>Reset</button>

@@ -8,12 +8,27 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import RoleBadge from '$lib/components/RoleBadge.svelte';
 	import CapabilityPicker from '$lib/components/CapabilityPicker.svelte';
+	import SortHeader from '$lib/components/SortHeader.svelte';
+	import { TableSort, matches } from '$lib/table.svelte';
 	import { capabilitySummary, type Capability } from '$lib/capabilities';
 	import type { ApiKeyView, InviteView, OrgMemberView, WebhookView } from '$lib/types';
 	import { STATUS_STYLE_LABELS, STATUS_STYLES, type StatusStyle } from '$lib/status-styles';
+	import CardOptions from '$lib/components/CardOptions.svelte';
+	import { FEATURE_LABELS, PUBLIC_FEATURES, allowed } from '$lib/features';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+
+	let memberSearch = $state('');
+	const memberSort = new TableSort<OrgMemberView>({
+		member: { by: (m) => m.name || m.username },
+		role: { by: (m) => m.role },
+		access: { by: (m) => (m.role === 'owner' ? Infinity : m.grants.length), dir: 'desc' },
+		joined: { by: (m) => m.joinedAt, dir: 'desc' }
+	});
+	let members = $derived(
+		memberSort.sorted(data.members.filter((m) => matches(memberSearch, m.name, m.username)))
+	);
 
 	type Dialog =
 		| {
@@ -33,6 +48,10 @@
 				events: Record<string, boolean>;
 				status: boolean;
 				style: StatusStyle;
+				interval: number;
+				linkStatus: boolean;
+				linkLeaderboard: boolean;
+				linkPanel: boolean;
 				allServers: boolean;
 				servers: Record<string, boolean>;
 		  }
@@ -215,6 +234,10 @@
 			events,
 			status: w?.statusEnabled ?? false,
 			style: w?.statusStyle ?? 'banner',
+			interval: w?.statusIntervalS ?? 60,
+			linkStatus: w?.linkStatus ?? true,
+			linkLeaderboard: w?.linkLeaderboard ?? true,
+			linkPanel: w?.linkPanel ?? false,
 			allServers: !w?.serverIds,
 			servers
 		};
@@ -229,6 +252,10 @@
 				.map(([k]) => k),
 			statusEnabled: d.status,
 			statusStyle: d.style,
+			statusIntervalS: d.interval,
+			linkStatus: d.linkStatus,
+			linkLeaderboard: d.linkLeaderboard,
+			linkPanel: d.linkPanel,
 			serverIds: d.allServers
 				? null
 				: Object.entries(d.servers)
@@ -305,6 +332,30 @@
 	function restore() {
 		void run(() => api('PATCH', orgPath, { suspended: false }), 'Organisation restored.', false);
 	}
+	const ALLOW_KEY = {
+		status: 'allowPublicStatus',
+		leaderboards: 'allowPublicLeaderboards'
+	} as const;
+	const setAllowance = (feature: 'status' | 'leaderboards', on: boolean) =>
+		run(
+			() => api('PATCH', orgPath, { [ALLOW_KEY[feature]]: on }),
+			on ? `${FEATURE_LABELS[feature]} allowed.` : `${FEATURE_LABELS[feature]} no longer allowed.`,
+			false
+		);
+
+	// --- the org's public pages: the Discord invite shown on them ---
+	let inviteUrl = $state('');
+	$effect(() => {
+		inviteUrl = data.org.discordInviteUrl;
+	});
+	function saveInvite() {
+		void run(
+			() => api('PATCH', orgPath, { discordInviteUrl: inviteUrl.trim() }),
+			inviteUrl.trim() ? 'Discord invite saved.' : 'Discord invite removed.',
+			false
+		);
+	}
+	let anyAllowed = $derived(PUBLIC_FEATURES.some((f) => allowed(data.org, f)));
 </script>
 
 <div class="grid grid-cols-1 gap-4 xl:grid-cols-[3fr_2fr]">
@@ -379,15 +430,29 @@
 		</div>
 
 		<div class="panel">
-			<span class="label-sm">Members</span>
+			<div class="mb-3 flex flex-wrap items-center gap-2">
+				<span class="label-sm mb-0!">Members</span>
+				<input
+					class="input w-full sm:ml-auto sm:w-64"
+					type="search"
+					placeholder="Filter by name or username…"
+					aria-label="Filter members"
+					bind:value={memberSearch}
+				/>
+			</div>
 			<div class="table-wrap">
 				<table>
-					<thead
-						><tr><th>Member</th><th>Org role</th><th>Server access</th><th>Joined</th><th></th></tr
-						></thead
-					>
+					<thead>
+						<tr>
+							<SortHeader sort={memberSort} key="member">Member</SortHeader>
+							<SortHeader sort={memberSort} key="role">Org role</SortHeader>
+							<SortHeader sort={memberSort} key="access">Server access</SortHeader>
+							<SortHeader sort={memberSort} key="joined">Joined</SortHeader>
+							<th></th>
+						</tr>
+					</thead>
 					<tbody>
-						{#each data.members as m (m.userId)}
+						{#each members as m (m.userId)}
 							<tr>
 								<td>
 									<div>
@@ -482,6 +547,24 @@
 						.serverLimit}.
 				</p>
 				<div class="mt-3 border-t border-white/8 pt-3">
+					<span class="field-label">Public pages this organisation may switch on</span>
+					{#each PUBLIC_FEATURES as feature (feature)}
+						<label class="flex items-center gap-2 py-1 text-[13px]">
+							<input
+								type="checkbox"
+								checked={allowed(data.org, feature)}
+								disabled={busy}
+								onchange={(e) => setAllowance(feature, e.currentTarget.checked)}
+							/>
+							{FEATURE_LABELS[feature]}
+						</label>
+					{/each}
+					<p class="note">
+						Allowed by default: the org's owners open each page per server. Unticking one closes
+						every such page in this organisation at once.
+					</p>
+				</div>
+				<div class="mt-3 border-t border-white/8 pt-3">
 					{#if data.org.suspended}
 						<button type="button" class="btn btn-sm" onclick={restore} disabled={busy}
 							>Restore organisation</button
@@ -508,6 +591,41 @@
 		{/if}
 
 		<div class="panel">
+			<span class="label-sm">Public pages</span>
+			{#if anyAllowed}
+				<p class="mb-3 text-[13px] text-mist-400">
+					This organisation may open a {PUBLIC_FEATURES.filter((f) => allowed(data.org, f))
+						.map((f) => FEATURE_LABELS[f].toLowerCase())
+						.join(' and ')}. Switch each on per server from the server's <b>Settings</b> tab or its edit
+					dialog.
+				</p>
+			{:else}
+				<p class="mb-3 text-[13px] text-mist-400">
+					The site owner has closed the public pages for this organisation.
+				</p>
+			{/if}
+			<label class="block"
+				><span class="field-label">Discord invite shown on the public pages</span>
+				<span class="join w-full">
+					<input
+						class="input font-mono text-[12.5px]"
+						type="url"
+						bind:value={inviteUrl}
+						placeholder="https://discord.gg/…"
+						maxlength="200"
+					/>
+					<button
+						type="button"
+						class="btn btn-sm h-auto"
+						onclick={saveInvite}
+						disabled={busy || inviteUrl.trim() === data.org.discordInviteUrl}>Save</button
+					>
+				</span>
+			</label>
+			<p class="note">A discord.gg or discord.com/invite link; blank removes the button.</p>
+		</div>
+
+		<div class="panel">
 			<div class="mb-3 flex items-center gap-3">
 				<span class="label-sm mb-0!">Discord webhooks</span>
 				<button class="ml-auto btn btn-sm btn-primary" onclick={() => openWebhook(null)}
@@ -515,8 +633,10 @@
 				>
 			</div>
 			<p class="mb-3 text-[13px] text-mist-400">
-				Mirror the audit trail into a channel (bans, kicks, trigger actions, sign-ins), or keep live
-				status cards there, one per server, showing the map and who is on. In Discord, open the
+				A webhook is one Discord channel, and each one carries what you tick for it: the audit trail
+				(bans, kicks, trigger actions, sign-ins), team kills from the kill feed, and live status
+				cards, one per server, showing the map and who is on. Add one webhook per channel; a
+				team-kill channel is simply a webhook with only that box ticked. In Discord, open the
 				channel's settings → Integrations → Webhooks, copy the URL and paste it here.
 			</p>
 			{#each data.webhooks as w (w.id)}
@@ -624,33 +744,9 @@
 				{/each}
 			</div>
 			<p class="note">
-				Pushed to every server in {data.org.name}. Server admins can add and remove entries too.
+				Pushed to every server in {data.org.name} (see the Servers tab). Server admins can add and remove
+				entries too.
 			</p>
-		</div>
-
-		<div class="panel">
-			<div class="mb-3 flex items-center gap-3">
-				<span class="label-sm mb-0!"
-					>Servers <span class="text-mist-600"
-						>{data.orgServers.length} / {data.org.serverLimit}</span
-					></span
-				>
-				<a class="ml-auto btn btn-sm" href="/servers">Manage servers</a>
-			</div>
-			{#each data.orgServers as s (s.id)}
-				<div class="kv items-center">
-					<a href="/server/{encodeURIComponent(s.id)}" class="text-accent hover:underline"
-						>{s.name}</a
-					>
-					<span class="font-mono text-[12px] text-mist-600">{s.host}:{s.port}</span>
-				</div>
-			{:else}
-				<p class="text-[13px] text-mist-400">
-					No servers yet. <a href="/servers" class="text-accent underline">Add one</a>; members with
-					a default server role on their invite link only get access to servers that exist when they
-					join.
-				</p>
-			{/each}
 		</div>
 	</div>
 </div>
@@ -778,6 +874,14 @@
 								>{/each}
 						</select></label
 					>
+					<div class="mt-2 space-y-3">
+						<CardOptions
+							bind:interval={d.interval}
+							bind:linkStatus={d.linkStatus}
+							bind:linkLeaderboard={d.linkLeaderboard}
+							bind:linkPanel={d.linkPanel}
+						/>
+					</div>
 				{/if}
 				<p class="note mt-1">
 					One card per server below, edited in place by the worker: players online, map, a score bar
@@ -819,7 +923,10 @@
 			</p>
 			<div class="flex justify-end gap-2 pt-2">
 				<button type="button" class="btn" data-close onclick={() => (dialog = null)}>Cancel</button>
-				<button type="submit" class="btn btn-primary" disabled={busy}
+				<button
+					type="submit"
+					class="btn btn-primary"
+					disabled={busy || (!d.allServers && !Object.values(d.servers).some(Boolean))}
 					>{d.id ? 'Save' : 'Add webhook'}</button
 				>
 			</div>
@@ -880,8 +987,12 @@
 			</p>
 			<div class="flex justify-end gap-2 pt-2">
 				<button type="button" class="btn" data-close onclick={() => (dialog = null)}>Cancel</button>
-				<button type="submit" class="btn btn-primary" disabled={busy || !d.capabilities.length}
-					>Create key</button
+				<button
+					type="submit"
+					class="btn btn-primary"
+					disabled={busy ||
+						!d.capabilities.length ||
+						(!d.allServers && !Object.values(d.servers).some(Boolean))}>Create key</button
 				>
 			</div>
 		</form>
