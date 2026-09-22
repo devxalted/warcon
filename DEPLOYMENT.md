@@ -162,7 +162,7 @@ directly -- no role, no ban list, no audit trail. That defeats the panel's state
 nobody on the team needs the RCON password.
 
 Three read capabilities now exist: `config.read`, `slots.read`, `automation.read`. All three are
-**admin-only by default** -- absent from viewer and operator -- and migration `0016` grants each to
+**admin-only by default** -- absent from viewer and operator -- and migration `0030` grants each to
 any role that already held the matching manage capability, so raising the floor never took a tab
 away from a role that could already edit what was behind it.
 
@@ -176,7 +176,11 @@ the rotation tab. So visibility is shaped by capability instead, in `config-visi
 | `config.read`  | the whole document, secret values stripped     |
 | neither        | the map rotation section alone, also stripped  |
 
-Shaping happens in `rcon-run.ts` after the game server answers, never in the browser.
+Shaping happens in `rcon-run.ts` after the game server answers, never in the browser. The
+`config` action itself is gated on `config.read`: upstream raised it to `config.apply`, which is
+safer than the `server.view` we shipped but leaves the middle tier unreachable -- the tab opens
+for a reader and the fetch then refuses them. The rotation tier survives as defence in depth;
+our build serves `GET /v1/rotation`, so the rotation tab uses the live route, not the document.
 
 `tab-guard.ts` refuses the pages themselves. Hiding a tab is presentation; the guard is the
 boundary. It answers **404, not 403** -- whether a server has automation rules is itself not a
@@ -184,10 +188,38 @@ viewer's business, and `requireServerCap` already 404s for a server you cannot s
 indistinguishable from outside. The Automation tab previously had no `load` check at all and
 handed every trigger to any viewer in the SSR payload; that is closed too.
 
-**This diverges from upstream and will conflict on merge**, unlike the branding. The changed files
-are `capabilities.ts`, `actions.ts`, `rcon-run.ts`, the server layout, three page loads and
-migration `0016`; the logic itself lives in two new files that cannot conflict. If upstream takes
-the fix, drop this and revert to theirs.
+**This diverges from upstream and conflicts on merge**, unlike the branding. The changed files are
+`capabilities.ts`, `actions.ts`, `rcon-run.ts`, the server layout, three page loads and migration
+`0030`; the logic itself lives in two new files that cannot conflict. If upstream takes the fix,
+drop this and revert to theirs.
+
+As of the 2026-09-22 merge upstream still has not: their `server.view` continues to grant the
+config document. They did tighten two things of their own -- `serverLog` moved to `audit.read`
+(stricter than the `server.view` we had, so operators lose the server log until that capability is
+added to the role in Orgs -> Roles) and the listener's peer addresses are now stripped for anyone
+but the site owner.
+
+### Renumbering this migration
+
+It was `0016`. Drizzle keeps **one high-water mark**, not a row per migration
+(`pg-core/dialect.js`: `lastDbMigration.created_at < migration.folderMillis`), so a migration dated
+at or below the newest applied row is skipped **in silence**. Ours was stamped between upstream's
+`0016` and `0017`, so merging it as-is would have quietly skipped two of theirs and left the schema
+short with no error anywhere.
+
+It is now `0030`, dated after upstream's `0029`. It is pure `UPDATE` guarded by `NOT capabilities
+@> ...`, so re-running it is a no-op.
+
+**A database that applied the old `0016` needs its watermark dropped once, before the deploy that
+carries this:**
+
+```sql
+DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1789436884670;
+```
+
+That returns the mark to `0015`, after which upstream's `0016`-`0029` apply in order and ours runs
+last. Do it **before** the new code starts, because the service migrates on boot. Verify with
+`SELECT count(*) FROM drizzle.__drizzle_migrations;` -- 17 before, 31 after.
 
 ## Org navigation
 
