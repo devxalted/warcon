@@ -21,6 +21,7 @@
 
 	let { data }: PageProps = $props();
 	let id = $derived(data.server.id);
+	let playersHref = $derived(`/server/${encodeURIComponent(data.server.id)}/players`);
 	const PAGE = 100;
 
 	// The filter starts from the URL, so a link to "this player's kills here" opens as one, and
@@ -122,6 +123,10 @@
 </script>
 
 <div class="panel">
+	<div class="join mb-3" role="tablist" aria-label="Which players">
+		<a class="btn" role="tab" aria-selected="false" href={playersHref}>Players</a>
+		<button class="btn btn-primary" role="tab" aria-selected="true" disabled>Kills</button>
+	</div>
 	<div class="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 		<input
 			class="input"

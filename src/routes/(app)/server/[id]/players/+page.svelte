@@ -49,6 +49,7 @@
 	let marksKey = '';
 	let marksAt = 0;
 	let base = $derived(`/server/${encodeURIComponent(data.server.id)}/players`);
+	let killsHref = $derived(`/server/${encodeURIComponent(data.server.id)}/kills`);
 
 	/** the roster in the worker's order until a header is clicked */
 	const sort = new TableSort<Player>({
@@ -203,6 +204,7 @@
 			aria-selected={view === 'past'}
 			onclick={() => (view = 'past')}>Past players</button
 		>
+		<a class="btn" role="tab" aria-selected="false" href={killsHref}>Kills</a>
 	</div>
 	{#if view === 'past'}
 		<PastPlayers

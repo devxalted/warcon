@@ -11,6 +11,8 @@
 
 	let { data, children }: LayoutProps = $props();
 
+	// Kills is not here: it is reached from the Players page's own switcher, because it is another
+	// way of looking at the same people rather than a separate part of the server.
 	// A tab whose reads need more than View names the capability, and the matching `load` refuses
 	// the URL as well -- this is presentation, not the boundary. Slots, Config and Automation are
 	// gated on our three read capabilities rather than upstream's manage ones, so a role can be
@@ -19,7 +21,6 @@
 	const TABS: readonly (readonly [string, string, Capability?])[] = [
 		['', 'Overview'],
 		['/players', 'Players'],
-		['/kills', 'Kills'],
 		['/bans', 'Bans'],
 		['/slots', 'Reserved slots', 'slots.read'],
 		['/rotation', 'Map rotation'],
