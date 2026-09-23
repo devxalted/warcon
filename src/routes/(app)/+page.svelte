@@ -63,7 +63,7 @@
 		}
 	});
 
-	/** organisations represented on the board; the select only appears when there is more than one */
+	/** organizations represented on the board; the select only appears when there is more than one */
 	let orgs = $derived.by(() => {
 		if (data.scope) return [];
 		const seen = new Map<string, string>();
@@ -134,7 +134,7 @@
 	<div class="callout">
 		{#if data.scope}
 			No servers in {data.scope.name}{data.canManage ? ' yet' : ' are shared with you'}. Pick
-			another organisation, or all of them, from the header.
+			another organization, or all of them, from the header.
 		{:else if data.canManage}
 			No servers yet. <a href="/servers" class="font-semibold text-accent underline"
 				>Add your first server</a
@@ -143,10 +143,10 @@
 				<code class="chip">1</code>, password <code class="chip">demo</code> to try the panel against
 				the built-in mock game server.{:else}.{/if}
 		{:else}
-			No servers have been shared with you yet. Ask an owner of your organisation to grant you
+			No servers have been shared with you yet. Ask an owner of your organization to grant you
 			access{#if data.canCreateOrg}, or <a
 					href="/sign-up"
-					class="font-semibold text-accent underline">create your own organisation</a
+					class="font-semibold text-accent underline">create your own organization</a
 				>{/if}.
 		{/if}
 	</div>
@@ -170,9 +170,9 @@
 				<select
 					class="input w-auto pr-[30px] sm:max-w-56"
 					bind:value={orgFilter}
-					aria-label="Organisation"
+					aria-label="Organization"
 				>
-					<option value="">All organisations</option>
+					<option value="">All organizations</option>
 					{#each orgs as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
 				</select>
 			{/if}

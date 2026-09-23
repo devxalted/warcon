@@ -1,5 +1,5 @@
 // Self-service: creating your own account (from an invite link or the sign-up page) and, when
-// ALLOW_ORG_SIGNUP is on, your own organisation.
+// ALLOW_ORG_SIGNUP is on, your own organization.
 import { fail, redirect, type RequestEvent } from '@sveltejs/kit';
 import { count, eq } from 'drizzle-orm';
 import { flag, maxOrgsPerUser, turnstileSiteKey, type Env } from './env';
@@ -28,10 +28,10 @@ export async function assertMayCreateOrg(env: Env, user: SessionUser): Promise<v
 	const left = await orgsRemaining(env, user);
 	if (left === null || left > 0) return;
 	if (!orgSignupEnabled(env))
-		throw new ApiError(403, 'Only the site owner can create organisations here.', 'forbidden');
+		throw new ApiError(403, 'Only the site owner can create organizations here.', 'forbidden');
 	throw new ApiError(
 		403,
-		`You have already created ${maxOrgsPerUser(env)} organisations; ask the site owner if you need more.`,
+		`You have already created ${maxOrgsPerUser(env)} organizations; ask the site owner if you need more.`,
 		'forbidden'
 	);
 }

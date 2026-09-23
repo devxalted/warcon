@@ -1,4 +1,4 @@
-// An organisation and the panel always keep an owner, also when the requests that would take the
+// An organization and the panel always keep an owner, also when the requests that would take the
 // last two away arrive together.
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';

@@ -323,7 +323,7 @@ export async function updateUser(
 		if (signOut) await tx.delete(session).where(eq(session.userId, u.id));
 		// A disabled account is signed out everywhere; the keys and links it minted work without
 		// a session, so they end with it (and stay ended if the account is enabled again).
-		// So do a site owner's when they stop being one: they could mint them in any organisation.
+		// So do a site owner's when they stop being one: they could mint them in any organization.
 		if (changes.disabled === true || (u.role === 'owner' && changes.role === 'member'))
 			Object.assign(changes, await revokeMintedBy(tx, u.id));
 	});
@@ -601,7 +601,7 @@ export async function createSsoUser(
  * Links a SteamID64 to the account (or clears it). One SteamID per account: an org that hands its
  * members reserved slots must know whose slot it is.
  */
-/** The organisation the panel opens scoped to; null clears it (every org). */
+/** The organization the panel opens scoped to; null clears it (every org). */
 export async function setDefaultOrg(env: Env, userId: string, orgId: string | null): Promise<void> {
 	await env.db.update(user).set({ defaultOrgId: orgId }).where(eq(user.id, userId));
 }

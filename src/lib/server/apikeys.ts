@@ -1,4 +1,4 @@
-// Organisation API keys: the records, their creation and revocation, and turning a bearer token
+// Organization API keys: the records, their creation and revocation, and turning a bearer token
 // into a principal for the hook. Format, hashing and scope rules live in apikeys-core.ts.
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { Env } from './env';
@@ -72,7 +72,7 @@ export async function createKey(
 	if (serverIds && capabilities.includes('lists.edit'))
 		throw new ApiError(
 			400,
-			"'Org lists' reaches every server in the organisation; a key limited to some servers cannot hold it."
+			"'Org lists' reaches every server in the organization; a key limited to some servers cannot hold it."
 		);
 	const days = int(body.expiresDays, 0, 0, 3650);
 	const expiresAt = days ? new Date(Date.now() + days * 86400_000) : null;
@@ -139,7 +139,7 @@ const touched = new Map<string, number>();
 
 /**
  * The principal behind a bearer token. Throws 401 for an unknown, revoked or expired key and 403
- * when its organisation is suspended, so the hook can answer without touching the session.
+ * when its organization is suspended, so the hook can answer without touching the session.
  */
 export async function resolveBearer(env: Env, token: string): Promise<ApiKeyPrincipal> {
 	const [row] = await env.db

@@ -13,7 +13,7 @@ async function target(event: RequestEvent) {
 		'bans.manage'
 	);
 	const org = await getOrg(env, server.orgId);
-	if (!org) throw new ApiError(404, 'Organisation not found.');
+	if (!org) throw new ApiError(404, 'Organization not found.');
 	return { env, server, user, org };
 }
 

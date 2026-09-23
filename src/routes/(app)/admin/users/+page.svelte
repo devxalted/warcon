@@ -168,19 +168,19 @@
 <div class="callout">
 	<b>Every account on this panel.</b> A site <b>owner</b> runs the whole panel and can do everything
 	on every server. A <b>member</b> belongs to one or more
-	<a href="/orgs" class="text-accent underline">organisations</a>, usually by opening an invite
-	link, and sees the servers they are granted there with one of that organisation's roles. Every org
+	<a href="/orgs" class="text-accent underline">organizations</a>, usually by opening an invite
+	link, and sees the servers they are granted there with one of that organization's roles. Every org
 	starts with <b>viewer</b> (read-only), <b>operator</b> (kick, kill, whisper, broadcast, map and
 	match control, live rotation edits, notes) and <b>admin</b> (everything on the server); its owners can
 	change what those mean and add roles of their own. Granting a server here also makes them a member of
-	its organisation.
+	its organization.
 </div>
 
 <div class="mb-3 flex flex-wrap items-center gap-2">
 	<input
 		class="input w-full sm:w-80"
 		type="search"
-		placeholder="Filter by name, username, organisation…"
+		placeholder="Filter by name, username, organization…"
 		aria-label="Filter users"
 		bind:value={search}
 	/>
@@ -200,7 +200,7 @@
 				<SortHeader {sort} key="role">Role</SortHeader>
 				<SortHeader {sort} key="status">Status</SortHeader>
 				<SortHeader {sort} key="signIn">Sign-in</SortHeader>
-				<SortHeader {sort} key="orgs">Organisations</SortHeader>
+				<SortHeader {sort} key="orgs">Organizations</SortHeader>
 				<SortHeader {sort} key="access">Server access</SortHeader>
 				<SortHeader {sort} key="lastLogin">Last login</SortHeader>
 				<th></th>

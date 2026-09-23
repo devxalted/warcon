@@ -101,7 +101,7 @@
 		(d.host.trim().toLowerCase() !== d.server.host ||
 			Number(d.port) !== d.server.port ||
 			d.scheme !== d.server.scheme);
-	/** What the site owner allows the dialog's organisation (the server's, or the one picked for a new one). */
+	/** What the site owner allows the dialog's organization (the server's, or the one picked for a new one). */
 	const allowancesOf = (d: { server: ServerInfo | null; orgId: string }) =>
 		d.server ?? data.ownedOrgs.find((o) => o.id === d.orgId) ?? NO_ALLOWANCES;
 	const FEATURE_KEY = { status: 'publicStatus', leaderboards: 'publicLeaderboards' } as const;
@@ -219,7 +219,7 @@
 	section of its ServerSettings.ini). RCON passwords are encrypted at rest and never shown again.
 	{#if data.demoAllowed}Host <code class="chip">demo</code> with password
 		<code class="chip">demo</code> uses the built-in mock server.{/if}
-	{#if !data.ownedOrgs.length}Servers belong to an organisation, and you do not own one yet: create
+	{#if !data.ownedOrgs.length}Servers belong to an organization, and you do not own one yet: create
 		one under <a href="/orgs" class="font-semibold text-accent underline">Orgs</a> first.{/if}
 </div>
 
@@ -233,8 +233,8 @@
 			aria-label="Search servers"
 		/>
 		{#if multiOrg}
-			<select class="input sm:w-56" bind:value={orgFilter} aria-label="Organisation">
-				<option value="">All organisations</option>
+			<select class="input sm:w-56" bind:value={orgFilter} aria-label="Organization">
+				<option value="">All organizations</option>
 				{#each data.ownedOrgs as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
 			</select>
 		{/if}
@@ -249,7 +249,7 @@
 		<thead>
 			<tr>
 				<SortHeader {sort} key="name">Name</SortHeader>
-				{#if multiOrg}<SortHeader {sort} key="org">Organisation</SortHeader>{/if}
+				{#if multiOrg}<SortHeader {sort} key="org">Organization</SortHeader>{/if}
 				<SortHeader {sort} key="target">Target</SortHeader>
 				<SortHeader {sort} key="order" num>Order</SortHeader>
 				<th></th>
@@ -304,7 +304,7 @@
 		>
 			{#if !d.server && multiOrg}
 				<label class="block"
-					><span class="field-label">Organisation</span>
+					><span class="field-label">Organization</span>
 					<select class="input" bind:value={d.orgId} required>
 						{#each data.ownedOrgs as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
 					</select>
@@ -502,7 +502,7 @@
 				bind:grants={d.grants}
 			/>
 			<p class="note">
-				Owners of {d.server.orgName} hold everything regardless. The whole organisation at once:
+				Owners of {d.server.orgName} hold everything regardless. The whole organization at once:
 				<a href="/orgs/{encodeURIComponent(d.server.orgId)}/access" class="text-accent underline"
 					>access matrix</a
 				>.

@@ -2,7 +2,7 @@
 	// A list of things (servers, or people) each with a role picker: the body of the access
 	// dialogs. Grows a filter box past a handful of rows, and a "set all" row that applies to
 	// whatever the filter currently shows. Rows may carry their own role list (the site owner's
-	// user dialog spans organisations); "set all" only appears when every row shares one.
+	// user dialog spans organizations); "set all" only appears when every row shares one.
 	import RoleSelect from './RoleSelect.svelte';
 
 	type RoleOption = { id: string; name: string };

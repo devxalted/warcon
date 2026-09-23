@@ -28,7 +28,7 @@ way in:
 What is in the box:
 
 - **Multiple servers** in one panel, each with its own encrypted RCON password.
-- **Organisations and invite links**: each clan or community is an organisation with its own
+- **Organizations and invite links**: each clan or community is an organization with its own
   servers, owners and members. An owner pastes an invite link into their Discord; whoever opens it
   signs in with Discord (creating their account on the spot) and joins with the roles the link
   carries. Per-server roles on top: every org starts with `viewer` / `operator` / `admin`, and its
@@ -51,7 +51,7 @@ What is in the box:
   per faction, uptime, time per map, busiest hours, player playtime and sessions, match history
   with results. Samples are written when something changes plus a heartbeat, and every figure is
   duration-weighted, so a faster cadence never distorts them.
-- **Player dossiers**: click any player for their history across the organisation's servers
+- **Player dossiers**: click any player for their history across the organization's servers
   (sessions, playtime, names used, K/D), the admin actions taken on them, shared notes and a
   watchlist, and, with a Steam key, their Steam persona, account age and VAC / game-ban record.
 - **Connect-time risk**: an advisory score from the Steam Web API, bans on the org's other
@@ -64,7 +64,7 @@ What is in the box:
   whisper on join or once the player has picked a faction, a whisper on faction change, scheduled
   broadcasts, empty-server map reset, and kick-on-connect for VAC bans, brand-new accounts or bans
   elsewhere in the org.
-- **Organisation ban and reserved lists**: ban a player across every server in the organisation
+- **Organization ban and reserved lists**: ban a player across every server in the organization
   at once, with a reason and an optional expiry; hand out reserved slots the same way. The worker
   keeps every server in line and shows where each entry stands; bans added outside the panel are
   left alone.
@@ -170,9 +170,9 @@ the checkout. Only a build whose source arrives without `.git` needs it passed i
 Open the URL. The first visit shows the **owner setup** form; after that it is a normal login. Then,
 as owner:
 
-1. **Orgs → New organisation**, or rename the **Default** organisation every install starts with.
+1. **Orgs → New organization**, or rename the **Default** organization every install starts with.
 2. **Servers → Add server**: name, host, port, scheme, RCON password. Use **Test** to check reach.
-   The organisation's **Servers** tab then shows them side by side with the live view: reach, map,
+   The organization's **Servers** tab then shows them side by side with the live view: reach, map,
    players, and who may open each.
 3. **Orgs → your org → New invite link**: pick the role joiners get, copy the link into your
    Discord. People open it, sign in with Discord, and appear under **Members**, where you can adjust
@@ -264,8 +264,8 @@ scraped as job `postgres`, which is optional.
 | `POLL_SECONDS` / `POLL_CONCURRENCY`                          | `20` / `128`           | Seeds for two of the runtime settings on a fresh install only; after that the owner edits cadences, budgets and retention under **Admin → Settings** without a restart.           |
 | `APP_NAME`                                                   | `Warcon`               | Name shown in the UI.                                                                                                                                                             |
 | `AUDIT_LOG_READS`                                            | `false`                | Also audit read-only calls (status polls etc.). Noisy.                                                                                                                            |
-| `ALLOW_ORG_SIGNUP`                                           | `false`                | Anyone may create an account and their own organisation at `/sign-up` (3 orgs per person). For hosted, multi-clan instances.                                                      |
-| `MAX_ORGS_PER_USER` / `MAX_SERVERS_PER_ORG`                  | `3` / `10`             | Self-serve limits. The site owner is exempt and can raise the server limit per organisation, or suspend one, from the Orgs page.                                                  |
+| `ALLOW_ORG_SIGNUP`                                           | `false`                | Anyone may create an account and their own organization at `/sign-up` (3 orgs per person). For hosted, multi-clan instances.                                                      |
+| `MAX_ORGS_PER_USER` / `MAX_SERVERS_PER_ORG`                  | `3` / `10`             | Self-serve limits. The site owner is exempt and can raise the server limit per organization, or suspend one, from the Orgs page.                                                  |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`                | unset                  | Cloudflare Turnstile challenge on the username-and-password sign-up forms (invite links and `/sign-up`). Recommended with `ALLOW_ORG_SIGNUP`.                                     |
 | `ALLOW_DEMO_SERVER`                                          | `true`                 | Allow a server with host `demo` served by the built-in mock.                                                                                                                      |
 | `GAME_TLS_INSECURE`                                          | `false`                | Accept self-signed certificates on `https` game servers.                                                                                                                          |
@@ -275,11 +275,11 @@ scraped as job `postgres`, which is optional.
 
 ### Roles
 
-Every server belongs to an **organisation**. People are members of organisations, either as
+Every server belongs to an **organization**. People are members of organizations, either as
 **org owner** or **member**, and members get a per-server role. The **site owner** (the account
 from first-run setup, plus anyone it promotes under Admin → Users) runs the whole panel.
 
-A server role is a named set of **capabilities**. Every organisation starts with three, `viewer`,
+A server role is a named set of **capabilities**. Every organization starts with three, `viewer`,
 `operator` and `admin`, holding what the table shows. Its owners can change any of them on the
 org's **Roles** tab (a change applies at once to everyone holding the role), reset a built-in to
 what it shipped with, and add roles of their own, say a `Trial staff` that may kick but not ban.
@@ -295,7 +295,7 @@ Org owners and the site owner hold every capability on every server in scope.
 | Notes & watchlist | read and add player notes (delete your own), watch and unwatch, the reason a player is watched                                                                            |        | ✓        | ✓     |
 | Bans              | ban and unban on the server                                                                                                                                               |        |          | ✓     |
 | Reserved slots    | reserve and unreserve on this server, with a note and an expiry, and read the notes; a Seeding reward rule that hands out slots here                                      |        |          | ✓     |
-| Org lists         | the organisation's ban and reserved-slot lists, pushed to every server; sync; a player's entry on them in the dossier                                                     |        |          | ✓     |
+| Org lists         | the organization's ban and reserved-slot lists, pushed to every server; sync; a player's entry on them in the dossier                                                     |        |          | ✓     |
 | Others' notes     | delete anyone's note                                                                                                                                                      |        |          | ✓     |
 | Save rotation     | save the rotation, rotation mode on and off                                                                                                                               |        |          | ✓     |
 | Config & settings | read, validate and apply the config document; score tick, sponsor image, connection test, the game's raw status                                                           |        |          | ✓     |
@@ -306,7 +306,7 @@ Org owners and the site owner hold every capability on every server in scope.
 View is what is happening on the server and nothing about how it is run. The config document, the
 triggers, staff notes on players and the game's RCON log each need the capability that manages
 them, in the panel and for API keys alike; where the server listens (its RCON host and port) and
-the notes on the Servers page are shown to the organisation's owners only.
+the notes on the Servers page are shown to the organization's owners only.
 
 No role reads the server's credentials. The config document leaves the panel with the RCON
 `Password`, its `PasswordHash` and the kill feed `Token` shown as `(hidden)`, for every role, org
@@ -319,11 +319,11 @@ the site owner, API keys included.
 
 Beyond server roles, an **org owner** adds, edits and removes the org's servers, manages members,
 roles, per-server grants and invite links and Discord webhooks, and sees the org's audit trail. The
-**site owner** creates and deletes organisations, manages every account, and sees the whole trail.
+**site owner** creates and deletes organizations, manages every account, and sees the whole trail.
 
 Members see the audit trail for their own actions plus everything on servers where their role
 includes _Audit trail_. Existing installs keep their access on upgrade: every grant is mapped to
-the matching built-in role of its organisation.
+the matching built-in role of its organization.
 
 ### Self-service sign-up
 
@@ -332,7 +332,7 @@ identity becomes the account), with a passkey, or, behind a link, with a usernam
 (8 sign-ups per IP address per half hour; add a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/)
 widget with `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` to keep bots off the username forms).
 With `ALLOW_ORG_SIGNUP=true`, `/sign-up` additionally
-lets anyone create an organisation of their own and become its owner, up to three per person, and
+lets anyone create an organization of their own and become its owner, up to three per person, and
 **Discord** and **Steam** on the sign-in page create an account for a user who has none
 and send them to `/sign-up`; the site owner still sees and can rename or delete every org. Leave
 it off for a single-clan install.
@@ -347,7 +347,7 @@ expected to be able to survive losing one thing. The rules, checked on the **Acc
 - **A second factor on any password.** A password on its own is never enough; turn on the
   authenticator app (TOTP, with backup codes) or drop the password and rely on passkeys and
   providers. Passkeys and provider sign-ins are two factors by themselves and never ask for a code.
-- **Owners hold a linked provider or a recovery key.** An organisation owner can reset a member's
+- **Owners hold a linked provider or a recovery key.** An organization owner can reset a member's
   methods under Admin → Users, but nobody resets an owner, so an owner needs a way back in that
   does not depend on one device.
 
@@ -356,7 +356,7 @@ at `/recover` signs the account in once, discards the key, and lands on the acco
 things up again. New accounts start with a passkey or a provider (the password form sits behind a
 link). Existing accounts keep working: a banner asks for the missing pieces. How hard the panel
 pushes is the site owner's **Settings → Sign-in rules** choice: _Advise only_ (the default: the
-banner and nothing more), _Require for privileged accounts_ (site owners, organisation owners and
+banner and nothing more), _Require for privileged accounts_ (site owners, organization owners and
 anyone whose server role can ban, change config, run automation or use raw RCON must comply;
 guests and viewers are left alone), or _Require for everyone_. Where required, an account that
 still falls short after its grace period (14 days for owners, 30 for members, both editable,
@@ -382,9 +382,9 @@ through `/api/passkeys/*`, and codes, recovery keys and Steam through the panel'
 ### Player dossiers, risk and the watchlist
 
 Every player name in the panel links to a dossier: sessions, playtime, kills and deaths on each
-of the organisation's servers, the names they have used, the admin actions taken on them (kicks,
+of the organization's servers, the names they have used, the admin actions taken on them (kicks,
 bans, whispers, trigger actions), notes admins have left, and a watchlist flag with a reason.
-Notes and the watchlist are shared by every server in the organisation; roles with _Notes &
+Notes and the watchlist are shared by every server in the organization; roles with _Notes &
 watchlist_ can write them, and a note can be deleted by its author or a role with _Others' notes_.
 
 With `STEAM_API_KEY` set, the dossier also shows the Steam persona, account age (public profiles
@@ -396,31 +396,31 @@ profile or friends list, local bans, name resemblance, and the watchlist add evi
 win rate, K/D, and headshot percentage across recorded games add smaller weights only after
 minimum match/kill counts. Headshot percentage uses kill-feed games only; the other totals use the
 panel's match and session history. A _Kick on connect risk_ rule that kicks at a risk level scores
-each joiner across the whole organisation.
+each joiner across the whole organization.
 At most 200 Steam friends are checked per account, and a partial count is labelled as such;
 the friends lookups keep to a fifth of the 100,000 calls a day Steam allows a key.
 Steam provides no documented profile-comments read endpoint to this panel, so comments are not
 scored. Missing data is not treated as clean data or as proof of cheating. The score is a pointer
 for an admin to look closer, not a verdict: the RCON API exposes no aim, position or input data.
 
-### Organisation ban and reserved lists
+### Organization ban and reserved lists
 
-Each organisation keeps a **ban list** and a **reserved-slot list** in the panel, under the
-**Ban list** and **Reserved slots** tabs of the organisation page, and pushes them to every one of
+Each organization keeps a **ban list** and a **reserved-slot list** in the panel, under the
+**Ban list** and **Reserved slots** tabs of the organization page, and pushes them to every one of
 its servers. Each server's own **Bans** and **Reserved slots** tabs show what that server holds,
-mark the entries the organisation put there, and link to the organisation lists. The Reserved
+mark the entries the organization put there, and link to the organization lists. The Reserved
 slots tab is a roster: who holds a slot, whether they are playing right now, the note and expiry
 on their entry, and how many player slots the server holds back for them. Its form reserves a
 slot **on this server only**, with a note and an expiry, through a reserved-slot list of the
 server's own: the panel applies it at once and withdraws it when the expiry comes, and the
-roster marks these _here_. The organisation's Reserved
+roster marks these _here_. The organization's Reserved
 slots tab has the same shape across every server: the roster with who is playing where, how far
 the list has been applied on each server, and the form that hands out a slot everywhere. Ban a player from the
-Players tab or a dossier and choose _every server in the organisation_ (the default, when you may
+Players tab or a dossier and choose _every server in the organization_ (the default, when you may
 edit the org list) or _this server only_. A ban on this server only goes on a ban list of the
 server's own, marked _here_ on its Bans tab with the reason, who placed it and when it lifts. The
 panel enforces its bans itself: the worker removes a banned player the moment it sees them on
-the server, with the organisation's ban message, and writes nothing to the game's own ban list or
+the server, with the organization's ban message, and writes nothing to the game's own ban list or
 files. Select a ban the panel holds and choose **Edit**
 to change its reason or expiry; who placed it and when stay as they are. Org owners and
 anyone whose role on one of the org's servers includes _Org lists_ can edit the org lists;
@@ -457,13 +457,13 @@ A ban or reserved slot with an **expiry** is lifted by the panel when the time c
 moves to the list's history as expired; an expired ban stops being enforced at once, and an
 expired slot is removed from every server the panel applied it to at the next sync. With
 **Members get a reserved slot** on (an owner's switch on the Reserved slots tab), every member of
-the organisation who linked a SteamID on their Account page is reserved a slot on all its servers,
+the organization who linked a SteamID on their Account page is reserved a slot on all its servers,
 skipped while the org has them banned. A **Seeding reward** rule (see [Automation](#automation-triggers))
-hands out expiring entries the same way, on the seeded server's own list or the organisation's,
+hands out expiring entries the same way, on the seeded server's own list or the organization's,
 to players who stayed while a server was low; the entry names the rule that added it.
 
 Bans are enforced by the panel, not by the game. The worker holds each server's bans (the
-organisation's list and the server's own) and, every time it looks at the server's players (every
+organization's list and the server's own) and, every time it looks at the server's players (every
 two seconds on a server with people on it, up to thirty on an empty one), removes anyone who is
 banned, showing them the ban message as it reads at that moment. A ban, an unban, an edit or an
 expiry therefore takes effect at once and on every server, whether or not the player is connected,
@@ -507,7 +507,7 @@ or API key with _Automation_ alone can read the rules and delete them.
 | High ping kick         | Kicks a player whose reported ping remains above a configurable limit for a configurable number of seconds. Normal or unavailable ping, leaving, or interrupted player-list polling resets the timer. Historical ping is not stored, so this rule cannot be replayed in a dry run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Team kill limit        | Whispers a player from N team kills in their current session, and kicks them at M. Needs the [kill feed](#kill-feed); acted on as each kill arrives, not per poll.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Match broadcast        | Announces the result when a match ends and the map as the next one starts, either message optional, with at least N players on. A match ends when the map changes or the faction scores fall back to zero (a faction reached the cap, or an admin ended the round; live builds send no score cap or match clock, so Warcon assumes the game's default of 100), so `{faction}` is whoever led at that moment, tied factions named together. Placeholders `{faction}` `{score}` `{scores}` `{cap}` `{previous}` `{map}` `{server}` `{players}` `{max}`. Sent one poll after the round ends.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Seeding reward         | Time a player spends on with at most N players counts as seed time, by default banked only once the server has filled (a count the rule sets, else the limit the server reports) with the player still on, so staying until the threshold and leaving, or a few minutes on an empty server, earns nothing (a switch on the rule counts every low minute instead); M minutes of it over the sessions that ended in the last D days earns a reserved slot for E days, with an optional whisper: on this server only (its own reserved-slot list, which needs the Reserved slots capability) or on every server in the organisation (the org list, which needs Org lists), chosen on the rule. The seeded server applies it at once and, for an org-wide slot, the other servers at their next sync; it lapses on its own and can be earned again; players who already hold a slot here are skipped. Seed time is kept on each session, so the dossier history, the leaderboard's Seed time column and the dry run show it.                                                            |
+| Seeding reward         | Time a player spends on with at most N players counts as seed time, by default banked only once the server has filled (a count the rule sets, else the limit the server reports) with the player still on, so staying until the threshold and leaving, or a few minutes on an empty server, earns nothing (a switch on the rule counts every low minute instead); M minutes of it over the sessions that ended in the last D days earns a reserved slot for E days, with an optional whisper: on this server only (its own reserved-slot list, which needs the Reserved slots capability) or on every server in the organization (the org list, which needs Org lists), chosen on the rule. The seeded server applies it at once and, for an org-wide slot, the other servers at their next sync; it lapses on its own and can be earned again; players who already hold a slot here are skipped. Seed time is kept on each session, so the dossier history, the leaderboard's Seed time column and the dry run show it.                                                            |
 
 **Dry run** replays the last 24 hours of the server's own history (joins, player counts, empty
 stretches, cached Steam data) against a rule and lists what it would have done, so you can tune a
@@ -552,7 +552,7 @@ restart), or have the proxy in front of the panel rewrite `/api/feed/events/api/
 ### Discord webhooks
 
 A webhook is one Discord channel, and each one carries what is ticked for it. On the
-organisation's overview an owner adds channel webhooks (in Discord: channel settings →
+organization's overview an owner adds channel webhooks (in Discord: channel settings →
 Integrations → Webhooks → copy URL) and chooses what to mirror: bans (including org list changes), other game commands, trigger
 actions, player notes and watchlist changes, management changes, sign-ins, team kills from the
 [kill feed](#kill-feed); for every server or a subset. A separate team-kill channel is a second
@@ -588,7 +588,7 @@ the card style, with the public page switches under them.
 ### Leaderboards and careers
 
 Every server page has a **Leaderboards** tab: a board over this server or every server of the
-organisation you can see, ranked by kills, deaths, K/D, kills per hour of playtime, playtime,
+organization you can see, ranked by kills, deaths, K/D, kills per hour of playtime, playtime,
 seed time (time on with the server low, as a [Seeding reward](#automation-triggers) counts it),
 matches played, wins, win rate or cash, over 7, 30 or 90 days or all time, paged, with sortable
 headers. A **playtime floor** (an hour by default) keeps a ten-minute visit off the top of the
@@ -599,7 +599,7 @@ the match's winner and final scores against the faction of the player's last ses
 match with no winner and nobody scoring has no result. Names link to the dossier.
 
 Each dossier has a **Career** section: rank on the all-time kills board for this server and the
-organisation, the current win or loss streak, matches with wins, losses and draws, a table per
+organization, the current win or loss streak, matches with wins, losses and draws, a table per
 map and per faction (matches, wins, K/D), and the last ten matches with map, faction, result,
 kills and deaths. Everything is read at page load from the tables the worker already writes;
 nothing is precomputed.
@@ -609,14 +609,14 @@ nothing is precomputed.
 Two pages of a server can be opened to anyone with the address. An org owner **switches each on**
 per server on the server's **Settings** tab, which shows the addresses to copy (the server's edit
 dialog carries the same switches); nothing is public until then.
-The site owner can **close** either page for a whole organisation from the org's page, next to
+The site owner can **close** either page for a whole organization from the org's page, next to
 the server limit, which shuts every such page in it at once.
 
 - **Live status** at `/s/<server id>`: map, mode, player count, join code and each team's players
   under its score with kills and deaths, refreshed every twenty seconds. A second switch under it
   adds the last twenty kills from the [kill feed](#kill-feed) (weapon, distance, names only).
 - **Leaderboards and careers** at `/s/<server id>/leaderboard` and `/s/<server id>/players/<SteamID>`:
-  the same board and career as the panel, over this server or the organisation's servers whose
+  the same board and career as the panel, over this server or the organization's servers whose
   leaderboards are public too, with the player's kill-feed record (headshots, longest shot,
   weapons, most killed, nemeses). While this is on, names on the live page open the career.
 
@@ -626,7 +626,7 @@ page shows in-game names alone. With leaderboards public, a player's SteamID is 
 is the address of their career, and the board, the live page's names and a career's most killed
 and nemeses link by it; the board also shows the in-game cash. A public board goes twenty pages
 deep (the top thousand); the panel's has no ceiling. A page that is off answers 404, so a closed page looks like no
-page. An org owner can set the organisation's **Discord invite** link (discord.gg or
+page. An org owner can set the organization's **Discord invite** link (discord.gg or
 discord.com/invite), shown as a button on its public pages. Each page has a JSON twin under
 `/api/public/servers/<id>`, rate limited per address and cacheable for a few seconds.
 
@@ -636,7 +636,7 @@ An account holds a username, display name, password hash if a password is set, t
 authenticator secret and backup codes if the app is on, passkey public keys, the hash of a
 recovery key, sessions (with the browser), the Discord id and avatar URL when Discord
 is linked, and a SteamID64 when Steam is linked or the person enters one on the Account page (so
-an organisation can hand them a reserved slot). Every sign-in and action is written to the audit
+an organization can hand them a reserved slot). Every sign-in and action is written to the audit
 trail with the actor's name and browser. IP addresses are not kept: the panel reads a request's
 address to throttle sign-ins and rate limit, in memory, and the login and sign-up lockouts store only a keyed
 hash of it. No email address is ever asked for. Nothing else is collected, and nothing leaves
@@ -644,9 +644,9 @@ the panel.
 
 Anyone can delete their own account from the **Account** page (right to erasure): password
 accounts confirm with the password, the rest by typing their username after a recent sign-in.
-Deletion removes the account, its credentials, passkeys, sessions, server roles and organisation
+Deletion removes the account, its credentials, passkeys, sessions, server roles and organization
 memberships at once. Audit entries the person caused stay for the record but lose their name and
-browser, and entries that named them lose the username. The only owner of an organisation, or the only site owner, must
+browser, and entries that named them lose the username. The only owner of an organization, or the only site owner, must
 hand over first, so nothing is left without an owner. The site owner can delete anyone from the
 Users tab of the Admin page under the same rules.
 
@@ -659,7 +659,7 @@ other people, publish a privacy notice that says so, along with the audit retent
 ### Site owner controls
 
 The **Admin** page (site owner only) has three tabs. **Overview** is the whole install at a
-glance, refreshed every five seconds: players online, servers reachable, organisations and users,
+glance, refreshed every five seconds: players online, servers reachable, organizations and users,
 kill feed and observation rates, the worker's tiers, queue and memory, the web process's request
 and error figures, the database's size table by table, players seen today, this month and ever
 (a tally cached for five minutes, with a Recount button), servers by game build, and whether the
@@ -667,22 +667,22 @@ and error figures, the database's size table by table, players seen today, this 
 the runtime settings (cadences, delivery, retention). The old `/users` and `/settings` addresses
 redirect to their tabs.
 
-The Orgs page shows every organisation with its creator, member and server counts against its
+The Orgs page shows every organization with its creator, member and server counts against its
 limit, and status. From there (or from an org's own page) the site owner can raise or lower an
 org's server limit and **suspend** it: members lose access to its servers, owners cannot add
 servers or mint links, and invite links stop working, until it is restored. Deleting an org removes
 its servers from the panel; the accounts stay. The org's page is also where the site owner can
 **close** the [public pages](#public-pages) (status page, leaderboards and careers) for that
-organisation; they are allowed for every organisation unless closed there.
+organization; they are allowed for every organization unless closed there.
 
 ### Bots and API keys
 
-A Discord bot or a script talks to the same `/api` routes as the panel, with an organisation
+A Discord bot or a script talks to the same `/api` routes as the panel, with an organization
 **API key** instead of a session. An org owner mints one on the org page under **API keys**: a
 label, the capabilities it carries (the same list roles use), which servers it may touch (or every
 server the org has, now and later), and an optional expiry. The token is shown once; only its
 hash is stored. Keys can read and act on servers and edit the org lists, but never manage the
-organisation, its members or its keys, and never reach the site owner's routes.
+organization, its members or its keys, and never reach the site owner's routes.
 
 ```sh
 # add a reserved slot from a bot: no cookie, no CSRF header, just the bearer
@@ -692,7 +692,7 @@ curl -X POST "$ORIGIN/api/orgs/$ORG_ID/lists/reserve/entries" \
 ```
 
 Every call a key makes is audited under `<label> (API key)`. Revoking a key on the org page ends
-it at once; a suspended organisation's keys stop working with it.
+it at once; a suspended organization's keys stop working with it.
 
 ### Invite links
 
@@ -826,12 +826,12 @@ src/lib/enrolment.ts           the sign-in rules (two ways in, second factor on 
 src/lib/server/steam-openid.ts Steam sign-in (OpenID 2.0); recovery.ts recovery keys; auth-plugin.ts sessions for both
 src/lib/capabilities.ts        the capability vocabulary and the built-in role defaults (client-safe)
 src/lib/server/access.ts       global and org roles, per-server capability access, accessible servers, login throttling
-src/lib/server/roles.ts        an organisation's editable server roles (built-ins seeded per org)
-src/lib/server/apikeys.ts / apikeys-core.ts   organisation API keys for bots: mint, resolve bearers, revoke (db) / token format and scope (pure)
+src/lib/server/roles.ts        an organization's editable server roles (built-ins seeded per org)
+src/lib/server/apikeys.ts / apikeys-core.ts   organization API keys for bots: mint, resolve bearers, revoke (db) / token format and scope (pure)
 src/lib/server/users.ts        account management on top of Better Auth (create, disable, reset, grants)
-src/lib/server/orgs.ts         organisations: members, per-server roles, invite links, joining
+src/lib/server/orgs.ts         organizations: members, per-server roles, invite links, joining
 src/lib/server/servers.ts      server records, reachability test, per-server grants
-src/lib/server/lists.ts        organisation ban and reserved-slot lists and each server's own reserved slots: entries, per-server standing, views
+src/lib/server/lists.ts        organization ban and reserved-slot lists and each server's own reserved slots: entries, per-server standing, views
 src/lib/server/lists-plan.ts / lists-sync.ts   what to add or remove on a server (pure) / the per-server sync run and API fan-out
 src/lib/server/actions.ts      every panel action -> capability + /v1 call(s)
 src/lib/server/rcon-run.ts     /api/servers/:id/rcon/:action dispatcher with audit rows
@@ -875,7 +875,7 @@ docs/wardogs-api.md            the reverse-engineered game-server API
 ### API cheatsheet
 
 All `/api` calls need either the session cookie (mutations then also need
-`X-Requested-With: warcon`) or an organisation API key as `Authorization: Bearer wck_…` (see
+`X-Requested-With: warcon`) or an organization API key as `Authorization: Bearer wck_…` (see
 [Bots and API keys](#bots-and-api-keys)).
 Sign-in, setup, password change and session revocation are SvelteKit form actions on their pages,
 which call Better Auth server-side behind the login lockout and the audit trail. Of Better Auth's
@@ -950,7 +950,7 @@ settings) · `serverLog` (Audit trail) · `raw` (Raw RCON).
   social sign-in endpoints are closed either way. Password accounts can link Discord from their
   Account page, and accounts created through Discord can set a password there to sign in by
   username as well.
-- Upgrading an existing install: the migration creates one organisation named "Default" holding
+- Upgrading an existing install: the migration creates one organization named "Default" holding
   every server, with existing owners as its owners and everyone else as members. Rename it on the
   Orgs page.
 - The demo server's state lives in process memory and resets on restart. Its players' SteamIDs are

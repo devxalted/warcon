@@ -409,7 +409,7 @@
 		Overview tab, combat stats on Analytics and player dossiers, and the team-kill trigger.
 		{#if feed && !feed.configured}Configure writes the endpoint and a token into the config
 			document; the game reads them at its next restart (its own twelve-hour one, or a manual
-			restart).{:else if feed && !data.server.manager}An owner of the organisation holds the token.{/if}
+			restart).{:else if feed && !data.server.manager}An owner of the organization holds the token.{/if}
 	</p>
 </div>
 

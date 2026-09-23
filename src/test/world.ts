@@ -1,4 +1,4 @@
-// The cast the permission tests run against: two organisations that must never see each other, a
+// The cast the permission tests run against: two organizations that must never see each other, a
 // suspended one, and one person per kind of access. Rows go in through Drizzle rather than the
 // panel's own writers, so a bug in a writer cannot hide a bug in a check.
 import { randomBytes } from 'node:crypto';

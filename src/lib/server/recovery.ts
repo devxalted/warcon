@@ -1,5 +1,5 @@
 // Recovery keys: a long one-time secret shown once, for the person nobody else can reset (the sole
-// owner of an organisation, or of the whole panel). The panel stores only its hash; using the key
+// owner of an organization, or of the whole panel). The panel stores only its hash; using the key
 // signs the account in, consumes it, and sends the user to the account page to set things up again.
 import { createHash, randomInt } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';

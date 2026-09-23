@@ -42,7 +42,7 @@
 	let listOrgs = $derived(data.orgs.filter((o) => o.lists && !o.suspended));
 	let orgNav = $derived.by((): { href: string; label: string; title: string } | null => {
 		if (data.user.role === 'owner')
-			return { href: '/orgs', label: 'Orgs', title: 'All organisations' };
+			return { href: '/orgs', label: 'Orgs', title: 'All organizations' };
 		if (ownedOrgs.length === 1)
 			return {
 				href: `/orgs/${encodeURIComponent(ownedOrgs[0].id)}`,
@@ -50,7 +50,7 @@
 				title: `Manage ${ownedOrgs[0].name}`
 			};
 		if (ownedOrgs.length > 1)
-			return { href: '/orgs', label: 'Orgs', title: 'Organisations you run' };
+			return { href: '/orgs', label: 'Orgs', title: 'Organizations you run' };
 		if (listOrgs.length === 1)
 			return {
 				href: `/orgs/${encodeURIComponent(listOrgs[0].id)}/bans`,
@@ -58,7 +58,7 @@
 				title: `${listOrgs[0].name} ban and reserved lists`
 			};
 		if (listOrgs.length > 1)
-			return { href: '/orgs', label: 'Orgs', title: 'Organisation lists you may edit' };
+			return { href: '/orgs', label: 'Orgs', title: 'Organization lists you may edit' };
 		return null;
 	});
 	let switcherOpen = $state(false);
@@ -76,7 +76,7 @@
 		);
 	});
 
-	// The organisation scope: which org's servers the switcher, dashboard and Servers page show.
+	// The organization scope: which org's servers the switcher, dashboard and Servers page show.
 	let scopeBusy = $state(false);
 	async function setScope(orgId: string | null) {
 		scopeOpen = false;
@@ -128,7 +128,7 @@
 				<button
 					type="button"
 					class="btn max-w-[110px] gap-1.5 pr-2.5 sm:max-w-[200px]"
-					title="Organisation scope"
+					title="Organization scope"
 					aria-haspopup="menu"
 					aria-expanded={scopeOpen}
 					disabled={scopeBusy}
@@ -153,7 +153,7 @@
 							class="menu-item {data.scope ? '' : 'border-accent! bg-accent/10 text-accent'}"
 							role="menuitemradio"
 							aria-checked={!data.scope}
-							onclick={() => setScope(null)}>All organisations</button
+							onclick={() => setScope(null)}>All organizations</button
 						>
 						{#each data.orgs as o (o.id)}
 							<button
@@ -254,7 +254,7 @@
 								class="menu-item {data.scope ? '' : 'border-accent! bg-accent/10 text-accent'}"
 								role="menuitemradio"
 								aria-checked={!data.scope}
-								onclick={() => setScope(null)}>All organisations</button
+								onclick={() => setScope(null)}>All organizations</button
 							>
 							{#each data.orgs as o (o.id)}
 								<button

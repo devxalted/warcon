@@ -215,7 +215,7 @@
 				<b
 					>Banned on {d.bannedOn.length} of {d.orgServerCount} server{d.orgServerCount === 1
 						? ''
-						: 's'} in this organisation.</b
+						: 's'} in this organization.</b
 				>
 				{#each d.bannedOn as b (b.serverId)}
 					<div>
@@ -309,7 +309,7 @@
 			<div class="panel">
 				<span class="label-sm">Combat</span>
 				<p class="mb-3 text-[12.5px] text-mist-600">
-					From the game's kill feed, across the organisation's servers you can see. A team kill
+					From the game's kill feed, across the organization's servers you can see. A team kill
 					counts as a kill here and a suicide as a death, and the feed only knows the time since it
 					was set up, so these differ from the scoreboard totals at the top.
 				</p>
@@ -456,7 +456,7 @@
 		{#if d.orgLists.canEdit}
 			<div class="panel">
 				<div class="mb-3 flex items-center gap-2">
-					<span class="label-sm mb-0!">Organisation lists</span>
+					<span class="label-sm mb-0!">Organization lists</span>
 					<a
 						href="/orgs/{encodeURIComponent(data.server.orgId)}/bans"
 						class="ml-auto text-[12px] text-accent hover:underline">Open the lists →</a
@@ -484,7 +484,7 @@
 								>
 							{/if}
 						{:else}
-							<span class="text-mist-400">Not on the organisation's ban list.</span>
+							<span class="text-mist-400">Not on the organization's ban list.</span>
 							{#if d.orgLists.canEdit}
 								<button
 									class="ml-auto btn btn-sm btn-danger"
@@ -516,7 +516,7 @@
 								>
 							{/if}
 						{:else}
-							<span class="text-mist-400">No reserved slot from the organisation.</span>
+							<span class="text-mist-400">No reserved slot from the organization.</span>
 							{#if d.orgLists.canEdit}
 								<button class="ml-auto btn btn-sm" disabled={busy} onclick={orgReserve}
 									>Reserve a slot</button
@@ -547,7 +547,7 @@
 				<p class="text-[13px] text-mist-400">Nothing stands out.</p>
 			{/if}
 			<p class="note">
-				Advisory only, from the Steam Web API, recorded game stats, this organisation's ban lists
+				Advisory only, from the Steam Web API, recorded game stats, this organization's ban lists
 				and the watchlist. It cannot see aim, position or input.
 				{#if !d.steamEnabled}<span class="text-warn"
 						>Steam lookup is off (set STEAM_API_KEY), so account age and VAC status are unknown.</span

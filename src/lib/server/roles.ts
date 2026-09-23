@@ -1,4 +1,4 @@
-// An organisation's server roles: named capability sets (see $lib/capabilities). Every org gets
+// An organization's server roles: named capability sets (see $lib/capabilities). Every org gets
 // the three built-ins at creation (and here, for anything older); owners may edit them, add their
 // own, and delete custom roles that nothing uses. Grants and invites point at roles by id, and
 // every writer checks the role belongs to the server's org, since the schema alone cannot.
@@ -273,7 +273,7 @@ export async function resetRole(
 	return shape(row, used.get(row.id) ?? { grants: 0, invites: 0 });
 }
 
-/** Roles of several orgs at once (the site owner's user dialog spans every organisation). */
+/** Roles of several orgs at once (the site owner's user dialog spans every organization). */
 export async function rolesByOrg(
 	env: Env,
 	orgIds: string[]

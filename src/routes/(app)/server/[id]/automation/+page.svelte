@@ -1264,7 +1264,7 @@
 						<legend class="field-label">Kick when the player is</legend>
 						<label class="flex items-center gap-2"
 							><input type="checkbox" bind:checked={f.bannedElsewhere} /> banned on another server in
-							this organisation</label
+							this organization</label
 						>
 						<label class="flex items-center gap-2"
 							><input type="checkbox" bind:checked={f.watchlist} /> on the watchlist</label
@@ -1626,7 +1626,7 @@
 							>
 							<label class="flex items-center gap-2 {canSlotOrg ? '' : 'text-mist-600'}"
 								><input type="radio" bind:group={f.slotScope} value="org" disabled={!canSlotOrg} />
-								on every server in the organisation</label
+								on every server in the organization</label
 							>
 						</div>
 					</fieldset>
@@ -1639,7 +1639,7 @@
 						With the box ticked, seed time stays pending until the server has filled with the player
 						still on; leave before that and it is forfeited. Unticked, every low minute counts as it
 						passes. A slot on this server only goes on this server's own reserved-slot list; one on
-						every server goes on the organisation's, which this server applies at once and the
+						every server goes on the organization's, which this server applies at once and the
 						others at their next sync. Either lapses on its own and can be earned again. Players who
 						already hold a reserved slot here are skipped.
 					</p>

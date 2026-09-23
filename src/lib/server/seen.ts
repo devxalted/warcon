@@ -1,4 +1,4 @@
-// Everyone an organisation has seen: one row per SteamID built from player_sessions on the org's
+// Everyone an organization has seen: one row per SteamID built from player_sessions on the org's
 // servers the viewer can open, with every name they played under. A player who never joined one
 // of those servers cannot appear here, whatever is searched for.
 import { sql, type SQL } from 'drizzle-orm';

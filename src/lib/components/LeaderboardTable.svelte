@@ -23,7 +23,7 @@
 		onchange,
 		hrefFor,
 		orgName = '',
-		/** offer the organisation scope (the panel always does; a public page only with more than one public server) */
+		/** offer the organization scope (the panel always does; a public page only with more than one public server) */
 		orgScope = true,
 		/** show SteamIDs under the names (the panel does, a public page does not) */
 		showIds = false,
@@ -86,8 +86,8 @@
 			<button
 				class="btn btn-sm {query.scope === 'org' ? 'btn-primary' : ''}"
 				onclick={() => set({ scope: 'org' })}
-				title={orgName ? `Every server of ${orgName}` : 'Every server of the organisation'}
-				>Organisation</button
+				title={orgName ? `Every server of ${orgName}` : 'Every server of the organization'}
+				>Organization</button
 			>
 		</div>
 	{/if}

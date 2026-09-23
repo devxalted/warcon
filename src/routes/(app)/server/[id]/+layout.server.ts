@@ -13,7 +13,7 @@ export const load: LayoutServerLoad = async ({ params, locals }) => {
 	const env = getEnv();
 	const user = requireUser(locals);
 	// Resolved here rather than from the (app) layout's list: that list is narrowed to the header's
-	// organisation scope, and a link into a server of another org must still open.
+	// organization scope, and a link into a server of another org must still open.
 	const row = await getServer(env, params.id);
 	const access = row ? await serverAccessFor(env, user, row.id) : null;
 	if (!row || !access) error(404, 'Server not found, or you have no access to it.');

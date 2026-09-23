@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The bare public shell: the mark, the server name, the organisation, a Discord invite when
+	// The bare public shell: the mark, the server name, the organization, a Discord invite when
 	// the org set one, links between the server's public pages, and one footer line back to the
 	// panel. The same width as the panel's pages; one column on a phone, where the link is usually
 	// opened from Discord.

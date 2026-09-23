@@ -116,7 +116,7 @@
 <div class="mb-4 flex flex-wrap items-center gap-3">
 	<div class="text-[13.5px] text-mist-400">
 		What each server role may do. Changing a role changes it for everyone who holds it, on every
-		server. Owners of the organisation always hold everything.
+		server. Owners of the organization always hold everything.
 	</div>
 	<button class="ml-auto btn" onclick={() => (adding = { name: '', caps: [VIEW] })} disabled={busy}
 		>New role</button

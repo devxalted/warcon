@@ -1,11 +1,11 @@
-// The organisation scope: which org's servers the dashboard, switcher and Servers page show.
-// A browser-level choice (cookie) wins; otherwise the account's default organisation; otherwise
+// The organization scope: which org's servers the dashboard, switcher and Servers page show.
+// A browser-level choice (cookie) wins; otherwise the account's default organization; otherwise
 // everything the user can see. It never widens access: it only filters what is already visible.
 import type { Cookies } from '@sveltejs/kit';
 import type { OrgSummary, SessionUser } from './access';
 
 export const SCOPE_COOKIE = 'warcon_scope';
-/** cookie value meaning "every organisation", overriding a default org */
+/** cookie value meaning "every organization", overriding a default org */
 const ALL = 'all';
 const YEAR_S = 365 * 24 * 3600;
 
@@ -16,7 +16,7 @@ export interface Scope {
 	session: boolean;
 }
 
-/** The org in effect for this request, or null for every organisation. */
+/** The org in effect for this request, or null for every organization. */
 export function resolveScope(
 	cookies: Cookies,
 	user: SessionUser,
@@ -30,7 +30,7 @@ export function resolveScope(
 	return org ? { id: org.id, name: org.name, session: raw !== undefined } : null;
 }
 
-/** Remember a browser-level scope; null pins "all organisations" over the account default. */
+/** Remember a browser-level scope; null pins "all organizations" over the account default. */
 export function setScopeCookie(cookies: Cookies, orgId: string | null): void {
 	cookies.set(SCOPE_COOKIE, orgId ?? ALL, {
 		path: '/',

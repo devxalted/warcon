@@ -53,7 +53,7 @@
 		busy = true;
 		try {
 			const res = await api<{ id: string }>('POST', '/api/orgs', { name: d.name.trim() });
-			toast('Organisation created.', 'ok');
+			toast('Organization created.', 'ok');
 			dialog = null;
 			await invalidateAll();
 			await goto(`/orgs/${encodeURIComponent(res.id)}`);
@@ -85,7 +85,7 @@
 		if (
 			!(await confirmDialog(
 				`Delete ${o.name}? This removes its ${o.serverCount} server${o.serverCount === 1 ? '' : 's'} from the panel, every membership and invite link. Audit history is kept.`,
-				{ okLabel: 'Delete organisation', danger: true }
+				{ okLabel: 'Delete organization', danger: true }
 			))
 		)
 			return;
@@ -93,22 +93,22 @@
 	}
 </script>
 
-<svelte:head><title>Organisations · {data.appName}</title></svelte:head>
+<svelte:head><title>Organizations · {data.appName}</title></svelte:head>
 
 <div class="mb-5 flex items-center gap-3">
-	<h1 class="text-xl font-semibold tracking-tight">Organisations</h1>
+	<h1 class="text-xl font-semibold tracking-tight">Organizations</h1>
 	{#if data.canCreateOrg}
 		<button class="ml-auto btn btn-primary" onclick={() => (dialog = { kind: 'create', name: '' })}
-			>New organisation</button
+			>New organization</button
 		>
 	{/if}
 </div>
 
 <div class="callout">
-	An <b>organisation</b> is a clan or community with its own servers, members and invite links. Its
+	An <b>organization</b> is a clan or community with its own servers, members and invite links. Its
 	<b>owners</b> add servers, mint invite links and decide who gets which role on each server; they
 	are admin on every server in it. <b>Members</b> see the servers they were granted.
-	{#if siteOwner}As site owner you see and run every organisation: raise a server limit, suspend or
+	{#if siteOwner}As site owner you see and run every organization: raise a server limit, suspend or
 		delete one from here or from its page.{/if}
 </div>
 
@@ -118,7 +118,7 @@
 			class="input w-full sm:w-72"
 			type="search"
 			placeholder="Search name or slug…"
-			aria-label="Search organisations"
+			aria-label="Search organizations"
 			bind:value={search}
 		/>
 		{#if search.trim()}
@@ -131,7 +131,7 @@
 	<table>
 		<thead>
 			<tr>
-				<SortHeader {sort} key="name">Organisation</SortHeader>
+				<SortHeader {sort} key="name">Organization</SortHeader>
 				{#if siteOwner}
 					<SortHeader {sort} key="created">Created</SortHeader>
 					<SortHeader {sort} key="status">Status</SortHeader>
@@ -237,10 +237,10 @@
 				<tr
 					><td colspan="6" class="py-8 text-center text-mist-600"
 						>{siteOwner
-							? 'No organisations yet.'
+							? 'No organizations yet.'
 							: data.canCreateOrg
-								? 'You are not in an organisation yet. Ask for an invite link, or create your own.'
-								: 'You are not in an organisation yet. Ask for an invite link.'}</td
+								? 'You are not in an organization yet. Ask for an invite link, or create your own.'
+								: 'You are not in an organization yet. Ask for an invite link.'}</td
 					></tr
 				>
 			{/each}
@@ -250,7 +250,7 @@
 
 {#if dialog?.kind === 'create'}
 	{@const d = dialog}
-	<Modal title="New organisation" onclose={() => (dialog = null)}>
+	<Modal title="New organization" onclose={() => (dialog = null)}>
 		<form
 			class="space-y-3"
 			onsubmit={(e) => {

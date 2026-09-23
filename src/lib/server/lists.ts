@@ -1,4 +1,4 @@
-// Organisation lists: the ban list and reserved-slot list an org keeps in the panel and pushes to
+// Organization lists: the ban list and reserved-slot list an org keeps in the panel and pushes to
 // every server it runs, and each server's own ban and reserved-slot lists, which only that server
 // takes.
 // This module owns the records, their validation and the views; the per-server sync (what to add
@@ -151,7 +151,7 @@ export async function orgLists(env: Env, orgId: string): Promise<ListRow[]> {
 
 export async function listOf(env: Env, orgId: string, kind: Kind): Promise<ListRow> {
 	const row = (await orgLists(env, orgId)).find((l) => l.kind === kind);
-	if (!row) throw new ApiError(500, `The organisation has no ${KIND_LABEL[kind]}.`);
+	if (!row) throw new ApiError(500, `The organization has no ${KIND_LABEL[kind]}.`);
 	return row;
 }
 

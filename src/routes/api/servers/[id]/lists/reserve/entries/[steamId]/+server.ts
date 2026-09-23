@@ -13,7 +13,7 @@ export const DELETE = route(async (event) => {
 		'slots.manage'
 	);
 	const org = await getOrg(env, server.orgId);
-	if (!org) throw new ApiError(404, 'Organisation not found.');
+	if (!org) throw new ApiError(404, 'Organization not found.');
 	const result = await removeServerEntry(
 		env,
 		event.request,

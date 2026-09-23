@@ -110,7 +110,7 @@ export const actions: Actions = {
 
 	/**
 	 * Existing linked accounts sign in. With ALLOW_ORG_SIGNUP on, a Discord user without an account
-	 * gets one here too (the same as /sign-up) and lands on /sign-up to create their organisation;
+	 * gets one here too (the same as /sign-up) and lands on /sign-up to create their organization;
 	 * with it off, accounts only come from invite links, so an unknown Discord user is bounced.
 	 */
 	discord: async ({ request, locals, url }) => {

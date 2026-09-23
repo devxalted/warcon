@@ -24,6 +24,6 @@ export async function parseServerScope(
 		.from(servers)
 		.where(and(eq(servers.orgId, orgId), inArray(servers.id, wanted)));
 	if (known.length !== wanted.length)
-		throw new ApiError(400, 'One of those servers is not in this organisation.', 'bad_scope');
+		throw new ApiError(400, 'One of those servers is not in this organization.', 'bad_scope');
 	return known.map((s) => s.id);
 }

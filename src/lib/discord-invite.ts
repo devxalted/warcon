@@ -1,4 +1,4 @@
-// An organisation's Discord invite link, as shown on its public pages. Only an invite URL is
+// An organization's Discord invite link, as shown on its public pages. Only an invite URL is
 // accepted (discord.gg/<code> or discord.com/invite/<code>), so the button can never point
 // anywhere else. Client-safe, so the form can validate as the owner types.
 

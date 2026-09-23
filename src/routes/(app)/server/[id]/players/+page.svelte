@@ -25,7 +25,7 @@
 	let notes = $derived(can(data.server.caps, 'players.notes'));
 	/** who is on now, or everyone who has played here */
 	let view = $state<'online' | 'past'>('online');
-	/** may the user write to the organisation's lists? Decides the ban dialog's default scope. */
+	/** may the user write to the organization's lists? Decides the ban dialog's default scope. */
 	let listState = $state<ServerListsState | null>(null);
 	let banning = $state<Player | null>(null);
 

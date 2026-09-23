@@ -138,12 +138,12 @@ export interface TeamKillConfig {
 	kickAt: number;
 	kickReason: string;
 }
-/** Where a Seeding reward's slot goes: this server's own list, or the organisation's (every server). */
+/** Where a Seeding reward's slot goes: this server's own list, or the organization's (every server). */
 export type SeedScope = 'server' | 'org';
 /**
  * A reserved slot for players who stay while the server is low: time on with at most `lowAt`
  * players counts as seed time, and `minutes` of it within `windowDays` earns a slot for
- * `slotDays`, on this server alone or across the organisation. `message` is whispered on the
+ * `slotDays`, on this server alone or across the organization. `message` is whispered on the
  * grant ('' for none). Rules saved before `scope` existed have none and hand out org-wide slots.
  */
 export interface SeedRewardConfig {

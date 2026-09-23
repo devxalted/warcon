@@ -171,7 +171,7 @@ function build(env: Env) {
 				authGraceStartedAt: { type: 'date', required: false, input: false }
 			},
 			// Self-service deletion from the account page (right to erasure). The endpoint checks the
-			// password when one is given; erasure.ts refuses to orphan the panel or an organisation and
+			// password when one is given; erasure.ts refuses to orphan the panel or an organization and
 			// pseudonymises the audit trail afterwards.
 			deleteUser: {
 				enabled: true,

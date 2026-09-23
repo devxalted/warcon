@@ -38,7 +38,7 @@ export interface SessionUser {
 	authComplete: boolean;
 	/** ISO time the grace period started (first sign-in after the rules arrived); null = not yet */
 	authGraceStartedAt: string | null;
-	/** set when this "user" is really an organisation API key (see apikeys.ts) */
+	/** set when this "user" is really an organization API key (see apikeys.ts) */
 	apiKey?: ApiKeyPrincipal | null;
 }
 
@@ -57,7 +57,7 @@ export const keyUser = (k: ApiKeyPrincipal): SessionUser => ({
 });
 
 export const keyForbidden = () =>
-	new ApiError(403, 'API keys cannot manage an organisation or the panel.', 'api_key_forbidden');
+	new ApiError(403, 'API keys cannot manage an organization or the panel.', 'api_key_forbidden');
 
 export const ORG_ROLES: OrgRole[] = ['owner', 'member'];
 
@@ -137,7 +137,7 @@ export async function requireOrgRole(
 	if (user.apiKey) throw keyForbidden();
 	const org = await getOrg(env, orgId);
 	const role = org ? await orgRoleFor(env, user, orgId) : null;
-	if (!org || !role) throw new ApiError(404, 'Organisation not found.', 'not_found');
+	if (!org || !role) throw new ApiError(404, 'Organization not found.', 'not_found');
 	if (org.suspendedAt && user.role !== 'owner')
 		throw new ApiError(403, `${org.name} is suspended. Contact the site owner.`, 'suspended');
 	if (need === 'owner' && role !== 'owner')
@@ -261,7 +261,7 @@ export async function requireListsRole(
 	const user = requireUser(locals);
 	const org = await getOrg(env, orgId);
 	const role = org ? await listsRoleFor(env, user, orgId) : null;
-	if (!org || !role) throw new ApiError(404, 'Organisation not found.', 'not_found');
+	if (!org || !role) throw new ApiError(404, 'Organization not found.', 'not_found');
 	if (org.suspendedAt && user.role !== 'owner')
 		throw new ApiError(403, `${org.name} is suspended. Contact the site owner.`, 'suspended');
 	if (need === 'owner' && role !== 'owner')
@@ -336,7 +336,7 @@ export async function requireServerManager(
 	if ((await orgRoleFor(env, user, server.orgId)) !== 'owner')
 		throw new ApiError(
 			403,
-			`Only an owner of the organisation that runs ${server.name} can do that.`,
+			`Only an owner of the organization that runs ${server.name} can do that.`,
 			'forbidden'
 		);
 	return { server, user };
@@ -417,7 +417,7 @@ export function shapeServer(
 
 /**
  * Every server the user can open: all of them for the site owner, else owned-org servers plus
- * grants. `orgId` narrows the list to one organisation (the header scope, or an org page).
+ * grants. `orgId` narrows the list to one organization (the header scope, or an org page).
  */
 export async function accessibleServers(
 	env: Env,

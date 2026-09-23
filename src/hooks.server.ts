@@ -155,7 +155,7 @@ const handleRequest: Handle = async ({ event, resolve }) => {
 	// routes in Better Auth's own disabledPaths.
 	if (isAuthApi && !AUTH_PUBLIC.test(path)) return json({ error: 'Not found.' }, { status: 404 });
 
-	// Bots: an organisation API key as a bearer token, on the JSON API only. It stands in for the
+	// Bots: an organization API key as a bearer token, on the JSON API only. It stands in for the
 	// session (cookies are ignored) and for the CSRF header (a browser cannot attach a bearer to a
 	// cross-site request). A bad key never falls back to the cookie: it is simply refused.
 	const authorization = event.request.headers.get('authorization');

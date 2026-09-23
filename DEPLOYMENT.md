@@ -224,7 +224,7 @@ last. Do it **before** the new code starts, because the service migrates on boot
 ## Org navigation
 
 Upstream shows an **Orgs** nav item to everyone. The list page is only useful to someone who runs
-more than one organisation, and org management is owners-only anyway (`/orgs/[id]` calls
+more than one organization, and org management is owners-only anyway (`/orgs/[id]` calls
 `requireOrgRole(..., 'owner')`, as do its API routes), so for most people it was a link to a page
 that would refuse them.
 

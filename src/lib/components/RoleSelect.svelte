@@ -1,7 +1,7 @@
 <script lang="ts">
-	// Picks one of an organisation's server roles, or none. `value` is the role id ('' = no
+	// Picks one of an organization's server roles, or none. `value` is the role id ('' = no
 	// access); null shows a blank choice for a mixed set. Roles come from the org: they differ
-	// per organisation and owners may add their own.
+	// per organization and owners may add their own.
 	type RoleOption = { id: string; name: string };
 	let {
 		value = $bindable(''),

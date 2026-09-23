@@ -56,7 +56,7 @@ const MATRIX: Record<string, Policy> = {
 	'DELETE api/users/[id]': 'site',
 	'PUT api/users/[id]/grants': 'site',
 
-	// an organisation
+	// an organization
 	'GET api/orgs': 'user',
 	'POST api/orgs': 'person',
 	'PATCH api/orgs/[id]': 'orgOwner',

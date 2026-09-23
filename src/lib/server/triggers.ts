@@ -129,11 +129,11 @@ const RULE_NEEDS: Record<Exclude<TriggerKind, 'seed_reward'>, [Capability, strin
 	team_kill: ['players.moderate', 'kicks players']
 };
 
-/** What one rule needs of whoever saves it. The Seeding reward reserves slots: here, or on the organisation's list. */
+/** What one rule needs of whoever saves it. The Seeding reward reserves slots: here, or on the organization's list. */
 export function ruleNeeds(kind: TriggerKind, config: unknown): [Capability, string] {
 	if (kind !== 'seed_reward') return RULE_NEEDS[kind];
 	return (config as Partial<SeedRewardConfig> | null)?.scope !== 'server'
-		? ['lists.edit', "edits the organisation's reserved-slot list"]
+		? ['lists.edit', "edits the organization's reserved-slot list"]
 		: ['slots.manage', 'reserves slots on this server'];
 }
 
@@ -1255,7 +1255,7 @@ export async function dryRun(
 			const at = new Date(t.crossedAt!);
 			push(
 				at,
-				`reserve ${names.get(steamId)} (${steamId}) ${c.scope === 'server' ? 'here' : 'across the organisation'} until ${dateOf(new Date(at.getTime() + c.slotDays * 86400_000))}: ${Math.floor(t.seconds / 60)} min with ${c.lowAt} or fewer on`
+				`reserve ${names.get(steamId)} (${steamId}) ${c.scope === 'server' ? 'here' : 'across the organization'} until ${dateOf(new Date(at.getTime() + c.slotDays * 86400_000))}: ${Math.floor(t.seconds / 60)} min with ${c.lowAt} or fewer on`
 			);
 		}
 		const lowMinutes = Math.round(stretches.reduce((n, l) => n + (l.to - l.from), 0) / 60_000);

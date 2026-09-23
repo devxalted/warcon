@@ -19,10 +19,10 @@
 	let orgName = $derived((form as { orgName?: string } | null)?.orgName ?? '');
 </script>
 
-<svelte:head><title>Create an organisation · {data.appName}</title></svelte:head>
+<svelte:head><title>Create an organization · {data.appName}</title></svelte:head>
 
 <div class="caps text-mist-400">Set up your clan or community</div>
-<div class="mt-1 text-[22px] font-semibold tracking-tight">Create an organisation</div>
+<div class="mt-1 text-[22px] font-semibold tracking-tight">Create an organization</div>
 <p class="mt-2 text-[13px] text-mist-400">
 	You become its owner: add your servers, mint invite links for your Discord, and decide who gets
 	which role.
@@ -56,7 +56,7 @@
 			}}
 		>
 			<label class="block"
-				><span class="field-label">Organisation name</span><input
+				><span class="field-label">Organization name</span><input
 					class="input"
 					name="orgName"
 					type="text"
@@ -68,7 +68,7 @@
 				/></label
 			>
 			<button class="btn w-full btn-primary" type="submit" disabled={busy}
-				>{busy ? 'Creating…' : 'Create organisation'}</button
+				>{busy ? 'Creating…' : 'Create organization'}</button
 			>
 		</form>
 		<a
@@ -78,10 +78,10 @@
 		>
 	{:else}
 		<p class="mt-4 text-[13.5px]">
-			You have already created the maximum number of organisations. Ask the site owner if you need
+			You have already created the maximum number of organizations. Ask the site owner if you need
 			another.
 		</p>
-		<a href="/orgs" class="mt-3 btn w-full">Your organisations</a>
+		<a href="/orgs" class="mt-3 btn w-full">Your organizations</a>
 	{/if}
 {:else}
 	<RegisterForm

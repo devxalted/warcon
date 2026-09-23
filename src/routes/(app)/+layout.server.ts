@@ -16,7 +16,7 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 		userOrgs(env, locals.user),
 		orgsRemaining(env, locals.user)
 	]);
-	// The scope narrows the dashboard, the switcher and the Servers page to one organisation.
+	// The scope narrows the dashboard, the switcher and the Servers page to one organization.
 	// Server pages, org pages and the Users page load what they need themselves, so a deep link
 	// into another org still works.
 	const scope = resolveScope(cookies, locals.user, orgs);
@@ -24,7 +24,7 @@ export const load: LayoutServerLoad = async ({ locals, cookies }) => {
 	return {
 		user: locals.user,
 		orgs,
-		/** organisation the server list is narrowed to, or null for every org the user can see */
+		/** organization the server list is narrowed to, or null for every org the user can see */
 		scope,
 		/** site owner or owner of at least one org: sees Servers and Orgs management */
 		canManage: canManage(locals.user, orgs),

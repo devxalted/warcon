@@ -1,4 +1,4 @@
-// The organisation's ban message: the text a banned player is shown, built from the ban's reason
+// The organization's ban message: the text a banned player is shown, built from the ban's reason
 // and a few facts about it. Shared by the sync (what goes to the game) and the forms (the preview).
 
 /** The message that sends the reason alone, as before there was a template. */

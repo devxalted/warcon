@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Who holds a reserved slot on this server: the roster as the game server holds it, with what
-	// the organisation's list and this server's own list contribute marked out, who is playing
+	// the organization's list and this server's own list contribute marked out, who is playing
 	// right now, and the controls to hand out or withdraw a slot here. A slot reserved here goes
 	// on the server's own list, so the panel applies it and lifts it at its expiry.
 	import { untrack } from 'svelte';
@@ -268,7 +268,7 @@
 			{ steamId, viaConfig },
 			{
 				confirm: src?.managed
-					? `${who} holds this slot through the organisation's list, so the panel will hand it back at the next sync. Withdraw it here anyway? To withdraw it everywhere, remove it from the organisation's reserved slots instead.`
+					? `${who} holds this slot through the organization's list, so the panel will hand it back at the next sync. Withdraw it here anyway? To withdraw it everywhere, remove it from the organization's reserved slots instead.`
 					: `Withdraw the reserved slot for ${who}?`,
 				danger: !!src?.managed,
 				after: refreshReserved
@@ -307,10 +307,10 @@
 
 	<div class="panel">
 		<div class="mb-3 flex flex-wrap items-center gap-2">
-			<span class="label-sm mb-0!">From the organisation · {data.server.orgName}</span>
+			<span class="label-sm mb-0!">From the organization · {data.server.orgName}</span>
 			<span class="ml-auto inline-flex flex-wrap gap-1.5">
 				{#if listState?.canEditOrg}
-					<a class="btn btn-sm" href="{orgPath}/reserved">Organisation list</a>
+					<a class="btn btn-sm" href="{orgPath}/reserved">Organization list</a>
 				{/if}
 				{#if listsEdit}
 					<button class="btn btn-sm" disabled={busy} onclick={syncNow}>Sync now</button>
@@ -320,10 +320,10 @@
 		<div class="flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
 			{#if orgReserveCount !== null}
 				<span
-					><b>{orgReserveCount}</b> on the organisation list, <b>{managedSlots}</b> applied here</span
+					><b>{orgReserveCount}</b> on the organization list, <b>{managedSlots}</b> applied here</span
 				>
 			{:else}
-				<span><b>{managedSlots}</b> applied here by the organisation</span>
+				<span><b>{managedSlots}</b> applied here by the organization</span>
 			{/if}
 			<span><b>{hereSlots}</b> reserved here</span>
 			<span><b>{localSlots}</b> added outside the panel</span>
@@ -414,7 +414,7 @@
 					This build has no live reserved-slot routes, so the panel writes the slot to
 					+DefaultReservedPlayerIds in its config document, taken up at the next restart.
 				{/if}
-				{#if listState?.canEditOrg}To reserve a slot on every server, use the organisation list.{/if}
+				{#if listState?.canEditOrg}To reserve a slot on every server, use the organization list.{/if}
 			{/if}
 		</p>
 	</div>
@@ -537,7 +537,7 @@
 			</table>
 		</div>
 		<p class="note">
-			<Badge tone="ok">org</Badge> and <Badge tone="accent">member</Badge> slots come from the organisation
+			<Badge tone="ok">org</Badge> and <Badge tone="accent">member</Badge> slots come from the organization
 			and are handed back if withdrawn here; <Badge tone="ok">here</Badge> slots were reserved on this
 			server through the panel, which lifts them at their expiry; <Badge>local</Badge> slots were added
 			outside the panel and it leaves them alone.{#if viaConfig}
@@ -550,7 +550,7 @@
 			<span class="block text-mist-400"
 				>A reserved slot lets your admins, donors and clan members skip the queue when the server is
 				full. Reserve one above{#if listState?.canEditOrg}, or hand them out across every server
-					from the organisation's list{/if}.</span
+					from the organization's list{/if}.</span
 			>
 		</div>
 	{/if}

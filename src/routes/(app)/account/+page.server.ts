@@ -62,14 +62,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 const wrongPassword = (message: string) => /INVALID_PASSWORD|invalid password/i.test(message);
 
 export const actions: Actions = {
-	/** Pick the organisation the panel opens scoped to; blank means every org. */
+	/** Pick the organization the panel opens scoped to; blank means every org. */
 	defaultOrg: async ({ request, locals, cookies }) => {
 		const env = getEnv();
 		const user = requireUser(locals);
 		const raw = str((await request.formData()).get('orgId'), 64);
 		const orgs = await userOrgs(env, user);
 		const org = raw ? orgs.find((o) => o.id === raw) : null;
-		if (raw && !org) return fail(404, { error: 'Organisation not found.' });
+		if (raw && !org) return fail(404, { error: 'Organization not found.' });
 		await setDefaultOrg(env, user.id, org?.id ?? null);
 		// The new default should take effect at once, so any browser-level override is dropped.
 		clearScopeCookie(cookies);
@@ -79,12 +79,12 @@ export const actions: Actions = {
 			action: 'account.default_org',
 			outcome: 'ok',
 			target: org?.name ?? '',
-			message: org ? `Default organisation: ${org.name}` : 'Default organisation cleared'
+			message: org ? `Default organization: ${org.name}` : 'Default organization cleared'
 		});
 		return { defaultOrg: true, orgName: org?.name ?? '' };
 	},
 
-	/** Link (or clear) the SteamID64 an organisation may hand a reserved slot to. */
+	/** Link (or clear) the SteamID64 an organization may hand a reserved slot to. */
 	steam: async ({ request, locals }) => {
 		const env = getEnv();
 		const user = requireUser(locals);

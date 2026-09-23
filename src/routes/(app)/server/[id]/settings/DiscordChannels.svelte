@@ -240,7 +240,7 @@
 					<div class="text-[12px] text-mist-400">
 						{carries(w)}{#if w.statusEnabled}
 							· {linksOf(w)}{/if}
-						{#if !w.serverIds}· every server in the organisation{:else if w.serverIds.length > 1}·
+						{#if !w.serverIds}· every server in the organization{:else if w.serverIds.length > 1}·
 							this and {w.serverIds.length - 1} other server{w.serverIds.length === 2
 								? ''
 								: 's'}{/if}

@@ -59,7 +59,7 @@ export const user = pgTable('user', {
 	mustChangePassword: boolean('must_change_password').notNull().default(false),
 	/** the member's own SteamID64, so an org can hand its members a reserved slot */
 	steamId: text('steam_id').unique(),
-	/** the organisation the panel opens on (dashboard, switcher, Servers); null = every org */
+	/** the organization the panel opens on (dashboard, switcher, Servers); null = every org */
 	defaultOrgId: text('default_org_id').references(() => organizations.id, { onDelete: 'set null' }),
 	// two-factor plugin
 	twoFactorEnabled: boolean('two_factor_enabled').default(false),
@@ -276,7 +276,7 @@ export const orgInvites = pgTable(
 );
 
 /**
- * Bearer credentials for bots and scripts, owned by an organisation. A key carries its own
+ * Bearer credentials for bots and scripts, owned by an organization. A key carries its own
  * capability set and an optional server allowlist (null = every org server, present and future);
  * it can never manage the org. Only the SHA-256 of the token is stored; the token is shown once.
  */
@@ -370,7 +370,7 @@ export const auditLog = pgTable(
 		actorName: text('actor_name').notNull().default(''),
 		serverId: text('server_id'),
 		serverName: text('server_name').notNull().default(''),
-		/** the organisation an event belongs to; org owners see these rows, not just their own */
+		/** the organization an event belongs to; org owners see these rows, not just their own */
 		orgId: text('org_id'),
 		/** auth | user | org | server | rcon | system */
 		category: text('category').notNull(),
@@ -688,7 +688,7 @@ export const webhooks = pgTable(
 	(t) => [index('webhooks_org_idx').on(t.orgId)]
 );
 
-// ---- Organisation lists: bans and reserved slots kept in the panel and pushed to every server --
+// ---- Organization lists: bans and reserved slots kept in the panel and pushed to every server --
 
 /**
  * A ban list or reserved-slot list an org owns. Servers subscribe through server_lists: every org

@@ -90,7 +90,7 @@
 			toast(
 				form.orgName
 					? `The panel now opens on ${form.orgName}.`
-					: 'The panel now opens on every organisation.',
+					: 'The panel now opens on every organization.',
 				'ok'
 			);
 		if (form?.error) toast(form.error, 'err');
@@ -597,23 +597,23 @@
 				<button class="btn" type="submit">Save</button>
 			</form>
 			<p class="note">
-				Your own SteamID64 (linking Steam above fills it in). Organisations that hand their members
+				Your own SteamID64 (linking Steam above fills it in). Organizations that hand their members
 				a reserved slot use it; leave it blank to opt out.
 			</p>
 
 			{#if data.orgs.length > 1}
 				<div class="mt-6 border-t border-white/8 pt-4">
-					<span class="label-sm">Default organisation</span>
+					<span class="label-sm">Default organization</span>
 					<form method="post" action="?/defaultOrg" use:enhance class="join w-full">
 						<select class="input" name="orgId" value={data.defaultOrgId}>
-							<option value="">Every organisation</option>
+							<option value="">Every organization</option>
 							{#each data.orgs as o (o.id)}<option value={o.id}>{o.name}</option>{/each}
 						</select>
 						<button class="btn" type="submit">Save</button>
 					</form>
 					<p class="note">
 						The dashboard, the server switcher and the Servers page open narrowed to this
-						organisation. The picker in the header changes it for one browser at a time.
+						organization. The picker in the header changes it for one browser at a time.
 					</p>
 				</div>
 			{/if}
@@ -626,12 +626,12 @@
 			<div class="space-y-2 text-[13px] leading-relaxed text-mist-400">
 				<p>
 					This removes your account, sign-in credentials, passkeys, sessions, server roles and
-					organisation memberships straight away. It cannot be undone.
+					organization memberships straight away. It cannot be undone.
 				</p>
 				<p>
 					Audit entries you caused are kept for the record but stripped of your name, IP address and
-					browser. Organisations and servers you created stay with their other owners. You cannot
-					delete your account while you are the only owner of an organisation, or the only site
+					browser. Organizations and servers you created stay with their other owners. You cannot
+					delete your account while you are the only owner of an organization, or the only site
 					owner.
 				</p>
 			</div>

@@ -388,7 +388,7 @@ export async function reconcileServer(
 		pending: false,
 		error: ''
 	};
-	if (org.suspendedAt) return { ...base, skipped: 'suspended', error: 'Organisation suspended.' };
+	if (org.suspendedAt) return { ...base, skipped: 'suspended', error: 'Organization suspended.' };
 	const locked = () =>
 		withServerLock(server.id, opts.waitMs, () => run(env, server, org, opts, base));
 	const ran =

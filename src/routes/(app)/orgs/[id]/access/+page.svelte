@@ -109,7 +109,7 @@
 
 {#if !data.orgServers.length}
 	<div class="callout">
-		This organisation has no servers yet. <a
+		This organization has no servers yet. <a
 			href="/servers"
 			class="font-semibold text-accent underline">Add one</a
 		> and come back to hand out access.

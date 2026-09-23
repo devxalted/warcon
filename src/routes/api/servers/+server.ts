@@ -15,7 +15,7 @@ export const POST = route(async ({ locals, request }) => {
 	const body = await readJson(request);
 	const orgId = str(body.orgId, 64);
 	if (!orgId)
-		throw new ApiError(400, 'orgId (the organisation that runs this server) is required.');
+		throw new ApiError(400, 'orgId (the organization that runs this server) is required.');
 	const { org, user } = await requireOrgRole(env, locals, orgId, 'owner');
 	const id = await createServer(env, request, user, org, body);
 	return apiJson({ ok: true, id }, 201);

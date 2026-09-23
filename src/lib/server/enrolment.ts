@@ -84,7 +84,7 @@ export const PRIVILEGED_CAPS: Capability[] = [
 	'players.notes.manage'
 ];
 
-/** Site owners, organisation owners, and anyone holding a server role with a privileged capability. */
+/** Site owners, organization owners, and anyone holding a server role with a privileged capability. */
 export async function isPrivileged(
 	env: Env,
 	u: { id: string; role: 'owner' | 'member' }

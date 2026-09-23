@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The server's public pages (a section of the Settings tab): a live status page and a
 	// leaderboard with career pages, each open to anyone with the address once switched on here
-	// (the site owner can close them for the organisation). Org owners only, like the server
+	// (the site owner can close them for the organization). Org owners only, like the server
 	// dialog that carries the same switches.
 	import { invalidateAll } from '$app/navigation';
 	import { api, errorMessage } from '$lib/api';
@@ -20,7 +20,7 @@
 		status:
 			'Map, mode, scores, player count, join code and who is on with kills and deaths, refreshed every twenty seconds.',
 		leaderboards:
-			"The same board as the Leaderboards tab (this server, or the organisation's public servers), and a career page per player."
+			"The same board as the Leaderboards tab (this server, or the organization's public servers), and a career page per player."
 	};
 	const address = (feature: PublicFeature) =>
 		`${data.origin}/s/${encodeURIComponent(data.server.id)}${PATH[feature]}`;
@@ -119,7 +119,7 @@
 		{/each}
 		<p class="note">
 			A Discord status card can link to these pages: pick the links on the channel above. The
-			organisation's Discord invite, shown as a button on every public page, is set on the
+			organization's Discord invite, shown as a button on every public page, is set on the
 			<a href={orgPage} class="text-accent hover:underline">org page</a>.
 		</p>
 	{/if}

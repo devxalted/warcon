@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The Leaderboards tab: one board over this server or the organisation, read once per
+	// The Leaderboards tab: one board over this server or the organization, read once per
 	// change of the controls (no polling: it is history, not a live view). The URL follows the
 	// query so a board can be linked.
 	import { page } from '$app/state';

@@ -1,5 +1,5 @@
 // What the matrices cannot show: access that changes (a suspension, a removal, an edited role),
-// the walls between organisations, and keys and invites from the token in. Each test seeds a
+// the walls between organizations, and keys and invites from the token in. Each test seeds a
 // world of its own, so the order they run in does not matter.
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -177,7 +177,7 @@ describe.skipIf(!hasTestDb)('access', () => {
 		});
 	});
 
-	describe('between organisations', () => {
+	describe('between organizations', () => {
 		test("an owner cannot reach into another org's server, by any id they supply", async () => {
 			const w = await seedWorld(env);
 			const theirs = w.otherOrgServer.id;
@@ -277,7 +277,7 @@ describe.skipIf(!hasTestDb)('access', () => {
 		});
 	});
 
-	describe('a suspended organisation', () => {
+	describe('a suspended organization', () => {
 		test('closes to its owner, members and keys, and stays open to the site owner', async () => {
 			const w = await seedWorld(env);
 			await suspend(env, w.org.id);

@@ -1,4 +1,4 @@
-// Organisations: the clan or community that owns a set of servers. People join through shareable
+// Organizations: the clan or community that owns a set of servers. People join through shareable
 // invite links (/join/<token>) rather than being created one by one.
 import { and, asc, count, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { maxServersPerOrg, type Env } from './env';
@@ -36,7 +36,7 @@ const iso = (v: Date | null | undefined): string | null => (v ? v.toISOString() 
 
 export function validateOrgName(v: unknown): string {
 	const name = str(v, 60);
-	if (name.length < 2) throw new ApiError(400, 'Organisation name must be at least 2 characters.');
+	if (name.length < 2) throw new ApiError(400, 'Organization name must be at least 2 characters.');
 	return name;
 }
 
@@ -72,7 +72,7 @@ export const serverLimitFor = (env: Env, org: Pick<OrgRow, 'serverLimit'>): numb
 	org.serverLimit ?? maxServersPerOrg(env);
 
 export const suspendedProblem = (org: Pick<OrgRow, 'suspendedAt'>): string | null =>
-	org.suspendedAt ? 'This organisation is suspended. Contact the site owner.' : null;
+	org.suspendedAt ? 'This organization is suspended. Contact the site owner.' : null;
 
 /** Org owners may add a server while the org is active and under its limit; the site owner always may. */
 export async function assertCanAddServer(env: Env, org: OrgRow, actor: SessionUser): Promise<void> {
@@ -474,7 +474,7 @@ async function memberOf(env: Env, orgId: string, userId: string) {
 		.innerJoin(user, eq(user.id, orgMembers.userId))
 		.where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)))
 		.limit(1);
-	if (!row) throw new ApiError(404, 'Not a member of this organisation.');
+	if (!row) throw new ApiError(404, 'Not a member of this organization.');
 	return { ...row.m, label: row.username || row.name };
 }
 
