@@ -1,6 +1,6 @@
 // Step one of registering a passkey. Signed in: for your own account. Not signed in: a
 // passkey-first sign-up, allowed in the same places a password sign-up is (first-run setup, an
-// invite link, or open organisation sign-up), with the same throttle and Turnstile check.
+// invite link, or open organization sign-up), with the same throttle and Turnstile check.
 import { getEnv } from '$lib/server/env';
 import { apiJson, ApiError, clientIp, readJson, route, str } from '$lib/server/http';
 import { timingSafeEqualStr } from '$lib/server/crypto';

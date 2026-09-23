@@ -1,5 +1,5 @@
 <script lang="ts">
-	// This server's ban list: what the game server holds, with what the organisation's list and the
+	// This server's ban list: what the game server holds, with what the organization's list and the
 	// server's own list contribute marked out, and the bans those lists still wait to place.
 	import { invalidateAll } from '$app/navigation';
 	import { api, rconGet, rconPost, errorMessage } from '$lib/api';
@@ -193,7 +193,7 @@
 						steamId,
 						reason: ban?.reason ?? ''
 					});
-			toast(describeSync(res.sync, `${steamId} is on the organisation's ban list.`), 'ok', 8000);
+			toast(describeSync(res.sync, `${steamId} is on the organization's ban list.`), 'ok', 8000);
 			await refreshAll();
 		} catch (err) {
 			toast(errorMessage(err), 'err');
@@ -224,7 +224,7 @@
 		const src = banSource(selectedBan);
 		if (src?.managed && src.scope === 'server') return liftHere(selectedBan);
 		const confirm = src?.managed
-			? `${selectedBan} is banned by the organisation's ban list, so the panel will ban them again at the next sync. Unban here anyway? To lift it everywhere, remove it from the organisation's ban list instead.`
+			? `${selectedBan} is banned by the organization's ban list, so the panel will ban them again at the next sync. Unban here anyway? To lift it everywhere, remove it from the organization's ban list instead.`
 			: `Unban ${selectedBan}?`;
 		await act(
 			'unban',
@@ -243,7 +243,7 @@
 
 <div class="mb-4 panel">
 	<div class="mb-2 flex flex-wrap items-center gap-2">
-		<span class="label-sm mb-0!">Organisation lists · {data.server.orgName}</span>
+		<span class="label-sm mb-0!">Organization lists · {data.server.orgName}</span>
 		<span class="ml-auto inline-flex flex-wrap gap-1.5">
 			{#if listState?.canEditOrg}
 				<a class="btn btn-sm" href="{orgPath}/bans">Ban list</a>
@@ -260,7 +260,7 @@
 			>
 		{:else}
 			<span class="text-mist-400"
-				>Managed by the organisation's owners and server admins; entries they push here are marked
+				>Managed by the organization's owners and server admins; entries they push here are marked
 				<Badge tone="ok">org</Badge> below.</span
 			>
 		{/if}
@@ -370,7 +370,7 @@
 		</table>
 	</div>
 	<p class="note">
-		<Badge tone="ok">org</Badge> bans come from the organisation's ban list and
+		<Badge tone="ok">org</Badge> bans come from the organization's ban list and
 		<Badge tone="ok">here</Badge> bans are on this server's own list. The panel enforces both itself:
 		a banned player is removed the moment they are seen on the server, and nothing is written to the game's
 		files, so an unban or an expiry takes effect at once. <Badge>local</Badge> bans are held by the game

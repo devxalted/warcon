@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The organisation's reserved-slot list, laid out like a server's Reserved slots tab: how many
+	// The organization's reserved-slot list, laid out like a server's Reserved slots tab: how many
 	// hold a slot and who is playing right now, where the list stands on each server, the form to
 	// hand out a slot everywhere, and the roster itself.
 	import { untrack } from 'svelte';

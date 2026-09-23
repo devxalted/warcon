@@ -1,4 +1,4 @@
-// Public career JSON for one player, over the organisation's servers with public leaderboards.
+// Public career JSON for one player, over the organization's servers with public leaderboards.
 import { getEnv } from '$lib/server/env';
 import { ApiError, apiJson, param, route } from '$lib/server/http';
 import {

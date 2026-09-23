@@ -1,4 +1,4 @@
-// Browser-level organisation scope: PUT {orgId} narrows the panel to one org for this browser,
+// Browser-level organization scope: PUT {orgId} narrows the panel to one org for this browser,
 // PUT {orgId: null} shows every org, DELETE returns to the account default.
 import { getEnv } from '$lib/server/env';
 import { apiJson, ApiError, readJson, route, str } from '$lib/server/http';
@@ -19,7 +19,7 @@ export const PUT = route(async (event) => {
 	if (orgId) {
 		const orgs = await userOrgs(env, user);
 		if (!orgs.some((o) => o.id === orgId))
-			throw new ApiError(404, 'Organisation not found.', 'not_found');
+			throw new ApiError(404, 'Organization not found.', 'not_found');
 	}
 	setScopeCookie(event.cookies, orgId);
 	return apiJson({ ok: true, orgId });

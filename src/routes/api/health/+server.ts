@@ -6,7 +6,7 @@ import { timingSafeEqualStr } from '$lib/server/crypto';
 
 // Liveness is public: a monitor or the container healthcheck reads only `ok`. The worker's
 // scheduler stats are fleet-wide operational data — total servers and players across every
-// organisation, memory and error rates — the same figures /metrics keeps behind a token, so they
+// organization, memory and error rates — the same figures /metrics keeps behind a token, so they
 // are added only for the site owner's own session or a caller presenting METRICS_TOKEN.
 export const GET: RequestHandler = async ({ locals, request }) => {
 	const env = getEnv();

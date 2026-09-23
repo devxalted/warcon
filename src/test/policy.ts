@@ -86,7 +86,7 @@ export function expected(policy: Policy, who: PrincipalName): Expect {
 
 /** The two refusals that mean "you cannot see this", as opposed to a missing role, note or rule. */
 const HIDDEN = new Set([
-	'Organisation not found.',
+	'Organization not found.',
 	'Server not found.',
 	'Server not found, or you have no access to it.'
 ]);

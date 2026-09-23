@@ -1,4 +1,4 @@
-// Self-service organisation sign-up (ALLOW_ORG_SIGNUP): create an account if needed, then an org
+// Self-service organization sign-up (ALLOW_ORG_SIGNUP): create an account if needed, then an org
 // with yourself as its first owner.
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -19,7 +19,7 @@ const HERE = '/sign-up';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	const env = getEnv();
-	if (!orgSignupEnabled(env)) error(404, 'Organisation sign-up is not enabled on this panel.');
+	if (!orgSignupEnabled(env)) error(404, 'Organization sign-up is not enabled on this panel.');
 	// The first account must be the site owner (see /setup); sign-up opens after that.
 	if ((await userCount(env)) === 0) redirect(303, '/setup');
 	return {

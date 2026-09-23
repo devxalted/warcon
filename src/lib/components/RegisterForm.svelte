@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Account creation for pages where a visitor without an account may make one (first-run setup,
-	// invite links, organisation sign-up). Providers first, then a passkey; a password is the
+	// invite links, organization sign-up). Providers first, then a passkey; a password is the
 	// fallback behind a link, not the default.
 	import { enhance } from '$app/forms';
 	import { untrack } from 'svelte';

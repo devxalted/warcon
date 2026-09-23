@@ -144,7 +144,7 @@
 		</div>
 	</div>
 	<div class={TILE}>
-		<span class="caps text-mist-400">Organisations</span>
+		<span class="caps text-mist-400">Organizations</span>
 		<div class={BIG}>{fmtNum(live.fleet.orgs)}</div>
 		<div class={SUB}>{fmtNum(live.fleet.orgsWeek)} joined in the last 7 days</div>
 	</div>

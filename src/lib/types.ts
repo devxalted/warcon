@@ -5,7 +5,7 @@ import type { BuiltinRole, Capability } from '$lib/capabilities';
 
 export type { OrgRole, Capability, BuiltinRole };
 
-/** A server role of one organisation: a name and what it may do. */
+/** A server role of one organization: a name and what it may do. */
 export interface RoleView {
 	id: string;
 	name: string;
@@ -19,7 +19,7 @@ export interface RoleView {
 	updatedAt: string | null;
 }
 
-/** A bearer credential owned by an organisation; the token itself is only ever returned on creation. */
+/** A bearer credential owned by an organization; the token itself is only ever returned on creation. */
 export interface ApiKeyView {
 	id: string;
 	label: string;
@@ -64,7 +64,7 @@ export interface ServerInfo {
 	publicLeaderboards: boolean;
 	/** the public status page also carries the last kills */
 	publicKills: boolean;
-	/** what the site owner allows this server's organisation */
+	/** what the site owner allows this server's organization */
 	allowPublicStatus: boolean;
 	allowPublicLeaderboards: boolean;
 }
@@ -425,9 +425,9 @@ export interface DossierView {
 	risk: RiskView;
 	watch: { watched: boolean; reason: string; updatedByName: string; updatedAt: string | null };
 	bannedOn: { serverId: string; serverName: string; reason: string; bannedBy: string }[];
-	/** how many servers the organisation runs (for "banned on N of M") */
+	/** how many servers the organization runs (for "banned on N of M") */
 	orgServerCount: number;
-	/** the player's standing on the organisation's lists, and whether the viewer may change it */
+	/** the player's standing on the organization's lists, and whether the viewer may change it */
 	orgLists: { ban: ListEntryView | null; reserve: ListEntryView | null; canEdit: boolean };
 	summary: {
 		sessions: number;
@@ -522,7 +522,7 @@ export interface WebhookView {
 	createdAt: string | null;
 }
 
-// ---- organisation lists (bans and reserved slots pushed to every server) ------------------------
+// ---- organization lists (bans and reserved slots pushed to every server) ------------------------
 
 export type ListKind = 'ban' | 'reserve';
 
@@ -610,7 +610,7 @@ export interface ImportCandidate {
 export interface BanState {
 	state: ListEntryState;
 	managed: boolean;
-	/** the list a managed ban comes from: the organisation's, or this server's own */
+	/** the list a managed ban comes from: the organization's, or this server's own */
 	scope: 'org' | 'server';
 	/** the reason on the list entry */
 	reason: string;
@@ -631,7 +631,7 @@ export interface ReservedSlotState {
 	note: string;
 	/** a slot the org hands its members, not an entry someone added */
 	member: boolean;
-	/** the list a managed slot comes from: the organisation's, or this server's own */
+	/** the list a managed slot comes from: the organization's, or this server's own */
 	scope: 'org' | 'server';
 	/** when the panel lifts the slot; null for a permanent one (or one not managed) */
 	expiresAt: string | null;

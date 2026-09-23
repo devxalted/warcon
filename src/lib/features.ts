@@ -1,5 +1,5 @@
 // Which public surfaces a server actually has. Each one needs two switches: the site owner has
-// not withdrawn it for the organisation (allowed by default), and an org owner has turned it on
+// not withdrawn it for the organization (allowed by default), and an org owner has turned it on
 // for the server. This is the one place
 // that combines them; public routes, the Discord card links and the server dialog all ask here,
 // never a raw column. Client-safe, so the dialog can grey a switch out with the same reason.
@@ -13,7 +13,7 @@ export const FEATURE_LABELS: Record<PublicFeature, string> = {
 	leaderboards: 'Public leaderboards and careers'
 };
 
-/** The organisation row's allowances (site owner). */
+/** The organization row's allowances (site owner). */
 export interface OrgAllowances {
 	allowPublicStatus: boolean;
 	allowPublicLeaderboards: boolean;
@@ -30,7 +30,7 @@ export const NO_ALLOWANCES: OrgAllowances = {
 };
 export const NO_SWITCHES: ServerSwitches = { publicStatus: false, publicLeaderboards: false };
 
-export const NOT_ALLOWED = 'Closed for this organisation by the site owner.';
+export const NOT_ALLOWED = 'Closed for this organization by the site owner.';
 
 export const allowed = (org: OrgAllowances, feature: PublicFeature): boolean =>
 	feature === 'status' ? org.allowPublicStatus : org.allowPublicLeaderboards;
@@ -38,7 +38,7 @@ export const allowed = (org: OrgAllowances, feature: PublicFeature): boolean =>
 export const wanted = (server: ServerSwitches, feature: PublicFeature): boolean =>
 	feature === 'status' ? server.publicStatus : server.publicLeaderboards;
 
-/** On only when the organisation is allowed it and the server has it switched on. */
+/** On only when the organization is allowed it and the server has it switched on. */
 export const featureOn = (
 	org: OrgAllowances,
 	server: ServerSwitches,

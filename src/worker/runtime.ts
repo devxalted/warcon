@@ -96,7 +96,7 @@ async function relay(env: Env, path: string, url: URL, req: Request): Promise<Re
 			return ok(await localGateway.observeNow(env, String(body.serverId)));
 		case '/sync-org': {
 			const org = await getOrg(env, String(body.orgId));
-			if (!org) throw new ApiError(404, 'Organisation not found.', 'not_found');
+			if (!org) throw new ApiError(404, 'Organization not found.', 'not_found');
 			return ok(await localGateway.syncOrg(env, org));
 		}
 		case '/sync-server': {
@@ -106,7 +106,7 @@ async function relay(env: Env, path: string, url: URL, req: Request): Promise<Re
 				.from(organizations)
 				.where(eq(organizations.id, server.orgId))
 				.limit(1);
-			if (!org) throw new ApiError(404, 'Organisation not found.', 'not_found');
+			if (!org) throw new ApiError(404, 'Organization not found.', 'not_found');
 			return ok(await localGateway.syncServer(env, server, org, Number(body.waitMs) || 0));
 		}
 		case '/settings-changed':

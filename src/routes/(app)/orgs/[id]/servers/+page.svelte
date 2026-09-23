@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The organisation's servers as this user may open them, with the worker's live view of each.
+	// The organization's servers as this user may open them, with the worker's live view of each.
 	// Adding, editing and sharing a server happens on the Servers page; this tab is where an org
 	// owner sees them side by side.
 	import { watchLive } from '$lib/live';

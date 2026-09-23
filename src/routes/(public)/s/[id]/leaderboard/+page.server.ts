@@ -1,5 +1,5 @@
 // The public leaderboard: 404 unless leaderboards are on for the server. The org scope covers
-// only the organisation's servers whose leaderboards are public too.
+// only the organization's servers whose leaderboards are public too.
 import type { PageServerLoad } from './$types';
 import { getEnv } from '$lib/server/env';
 import {

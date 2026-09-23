@@ -197,7 +197,7 @@ async function deliverOne(env: Env, row: OutboxRow): Promise<void> {
 
 /**
  * A Seeding reward is a panel action, not a game request: the player goes on the server's own
- * reserved list, or the organisation's, for the rule's number of days from now. The seeded
+ * reserved list, or the organization's, for the rule's number of days from now. The seeded
  * server is nudged to sync at once; with an org-wide slot the org's other servers pick the entry
  * up on their own next sync, as they would an expiry, so a burst of grants is never a burst of
  * fan-outs across the org. Earned slots do not go stale, so the age cut-off does not apply, and

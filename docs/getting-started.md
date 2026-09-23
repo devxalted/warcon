@@ -92,12 +92,12 @@ the machine reboots.
 ## Step 4: create your owner account
 
 The very first visit shows a **setup** form. Pick a username and a strong password. This is the
-**site owner** account: it can do everything, including creating organisations, adding servers and
+**site owner** account: it can do everything, including creating organizations, adding servers and
 managing every account. There is only one setup screen, and it disappears once the owner exists.
 
-Every install starts with one organisation called **Default**. Go to **Orgs** and rename it after
+Every install starts with one organization called **Default**. Go to **Orgs** and rename it after
 your clan or community, or create a new one. Servers, members and invite links all hang off an
-organisation.
+organization.
 
 ## Step 5: try the demo server first
 
@@ -132,7 +132,7 @@ Press **Test** before saving. If it fails, see [If Test fails](#if-test-fails) b
 ## Step 7: let your team in
 
 1. Set up "Sign in with Discord" once (see [Discord sign-in](#discord-sign-in) below).
-2. **Orgs → your organisation → New invite link.** Choose what joiners become: usually `member`
+2. **Orgs → your organization → New invite link.** Choose what joiners become: usually `member`
    with `viewer` access to your current servers. Give it an expiry and, if you like, a use limit.
 3. **Copy** the link and paste it into your clan's Discord. Whoever opens it clicks **Continue with
    Discord**, gets an account, and joins. They appear under **Members** on the org page.
@@ -167,7 +167,7 @@ instead.
 ### Letting other clans in
 
 Running Warcon for more than your own clan? Set `ALLOW_ORG_SIGNUP=true` in `.env`. The sign-in page
-then offers **Create your own organisation**, where anyone can sign up and start their own org
+then offers **Create your own organization**, where anyone can sign up and start their own org
 with their own servers and invite links. You remain site owner over all of them.
 
 On a public instance, also add a free [Cloudflare Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile)

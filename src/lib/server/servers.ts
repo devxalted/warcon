@@ -40,7 +40,7 @@ export const PUBLIC_SWITCH_KEYS: readonly PublicSwitchKey[] = [
 
 /**
  * The public-page switches an org owner may set. Turning a page on needs the site owner's
- * allowance for the organisation; turning off never does, so a page can always be closed. The
+ * allowance for the organization; turning off never does, so a page can always be closed. The
  * kill feed switch is part of the status page and needs no allowance of its own.
  */
 export function publicSwitches(
@@ -235,7 +235,7 @@ export async function updateServer(
 	const set: Partial<typeof servers.$inferInsert> = { ...t };
 	if (PUBLIC_SWITCH_KEYS.some((k) => body[k] !== undefined)) {
 		const org = await getOrg(env, server.orgId);
-		if (!org) throw new ApiError(404, 'Organisation not found.', 'not_found');
+		if (!org) throw new ApiError(404, 'Organization not found.', 'not_found');
 		Object.assign(set, publicSwitches(org, body));
 	}
 	if (typeof body.password === 'string' && body.password)

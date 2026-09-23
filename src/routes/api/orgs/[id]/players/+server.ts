@@ -1,4 +1,4 @@
-// Everyone the organisation has seen on the servers the caller can open, paged.
+// Everyone the organization has seen on the servers the caller can open, paged.
 import { getEnv } from '$lib/server/env';
 import { apiJson, int, param, route } from '$lib/server/http';
 import { accessibleServers, requireListsRole } from '$lib/server/access';

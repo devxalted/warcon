@@ -31,7 +31,7 @@ export interface Env {
 	APP_NAME?: string;
 	AUDIT_LOG_READS?: string;
 	ALLOW_DEMO_SERVER?: string;
-	/** Let anyone create an account and their own organisation from /sign-up. */
+	/** Let anyone create an account and their own organization from /sign-up. */
 	ALLOW_ORG_SIGNUP?: string;
 	/** Self-serve limits: orgs one person may create, servers one org may hold (site owner can raise per org). */
 	MAX_ORGS_PER_USER?: string;

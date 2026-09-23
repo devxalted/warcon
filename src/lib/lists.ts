@@ -1,4 +1,4 @@
-// Browser-side helpers for the organisation ban and reserved-slot lists.
+// Browser-side helpers for the organization ban and reserved-slot lists.
 import type { Tone } from './components/Badge.svelte';
 import type { ListEntryState, ListKind, ListSyncSummary } from './types';
 

@@ -33,7 +33,7 @@
 		busy = true;
 		try {
 			await api('PATCH', orgPath, { name: renaming.trim() });
-			toast('Organisation renamed.', 'ok');
+			toast('Organization renamed.', 'ok');
 			renaming = null;
 			await invalidateAll();
 		} catch (err) {
@@ -47,14 +47,14 @@
 		if (
 			!(await confirmDialog(
 				`Delete ${data.org.name}? This removes its ${n} server${n === 1 ? '' : 's'} from the panel, every membership and invite link. Audit history is kept.`,
-				{ okLabel: 'Delete organisation', danger: true }
+				{ okLabel: 'Delete organization', danger: true }
 			))
 		)
 			return;
 		busy = true;
 		try {
 			await api('DELETE', orgPath);
-			toast('Organisation deleted.', 'ok');
+			toast('Organization deleted.', 'ok');
 			await invalidateAll();
 			await goto('/orgs');
 		} catch (err) {
@@ -69,7 +69,7 @@
 
 <div class="mb-4 flex flex-wrap items-center gap-3">
 	<div>
-		<a href="/orgs" class="caps text-mist-400 hover:text-mist-100">Organisations</a>
+		<a href="/orgs" class="caps text-mist-400 hover:text-mist-100">Organizations</a>
 		<h1 class="text-xl font-semibold tracking-tight">{data.org.name}</h1>
 	</div>
 	{#if owner}
@@ -80,7 +80,7 @@
 	{/if}
 </div>
 
-<nav class="strip mb-5 gap-1 border-b border-white/8 pb-3" aria-label="Organisation sections">
+<nav class="strip mb-5 gap-1 border-b border-white/8 pb-3" aria-label="Organization sections">
 	{#each tabs as [path, label] (path)}
 		<a href="{base}{path}" class="tab-link {current === path ? 'tab-link-active' : ''}">{label}</a>
 	{/each}
@@ -99,7 +99,7 @@
 {/key}
 
 {#if renaming !== null}
-	<Modal title="Rename organisation" onclose={() => (renaming = null)}>
+	<Modal title="Rename organization" onclose={() => (renaming = null)}>
 		<form
 			class="space-y-3"
 			onsubmit={(e) => {

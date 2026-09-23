@@ -1,5 +1,5 @@
 // The permission vocabulary. A capability is one thing a person (or an API key) may do on a
-// server; an organisation's roles are named sets of them, and org owners and the site owner hold
+// server; an organization's roles are named sets of them, and org owners and the site owner hold
 // every one. This module is pure and client-safe: pages, the role editor and the server all read
 // the same list, so the browser can hide a button for exactly the reason the API refuses it.
 
@@ -99,7 +99,7 @@ export const CAPABILITY_INFO: Record<Capability, CapabilityInfo> = {
 	},
 	'lists.edit': {
 		label: 'Org lists',
-		hint: "Edit the organisation's ban and reserved-slot lists and push them to servers; see a player's entry on them in the dossier.",
+		hint: "Edit the organization's ban and reserved-slot lists and push them to servers; see a player's entry on them in the dossier.",
 		group: 'moderate'
 	},
 	'players.notes.manage': {
@@ -159,7 +159,7 @@ const OPERATOR: Capability[] = [
 ];
 
 /**
- * What each built-in role starts with; owners may change them per organisation.
+ * What each built-in role starts with; owners may change them per organization.
  *
  * The three read capabilities added above are deliberately absent from viewer and operator: the
  * config document, the reserved-slot roster and the automation rules are admin-only by default.

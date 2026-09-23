@@ -17,7 +17,7 @@ type DeletingUser = { id: string; role?: string | null; username?: string | null
 const refuse = (message: string) =>
 	APIError.from('BAD_REQUEST', { code: 'CANNOT_DELETE_ACCOUNT', message });
 
-/** The panel must keep a site owner, and every organisation must keep an owner. */
+/** The panel must keep a site owner, and every organization must keep an owner. */
 export async function assertMayDeleteSelf(env: Env, u: DeletingUser): Promise<void> {
 	if (u.role === 'owner') {
 		const [row] = await env.db
@@ -36,7 +36,7 @@ export async function assertMayDeleteSelf(env: Env, u: DeletingUser): Promise<vo
 	const sole = await soleOwnerOf(env, u.id);
 	if (sole.length)
 		throw refuse(
-			`You are the only owner of ${sole.join(', ')}. Promote another owner there, or delete the organisation, first.`
+			`You are the only owner of ${sole.join(', ')}. Promote another owner there, or delete the organization, first.`
 		);
 }
 

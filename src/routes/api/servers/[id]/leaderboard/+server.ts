@@ -1,4 +1,4 @@
-// One page of the leaderboard: this server, or every server of its organisation the caller can
+// One page of the leaderboard: this server, or every server of its organization the caller can
 // see. Read at page load from kills, player_sessions and matches; nothing is precomputed.
 // ?scope=server|org&range=7d|30d|90d|all&sort=<metric>&dir=asc|desc&page=1&minMinutes=60
 import { getEnv } from '$lib/server/env';

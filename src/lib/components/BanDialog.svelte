@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Ban a player: across the whole organisation (the org ban list, pushed to every server) or on
+	// Ban a player: across the whole organization (the org ban list, pushed to every server) or on
 	// one server only. Used from the org ban list page, the players page and the dossier.
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -14,7 +14,7 @@
 
 	let {
 		orgId,
-		orgName = 'the organisation',
+		orgName = 'the organization',
 		steamId = '',
 		name = '',
 		server = null,
@@ -148,7 +148,7 @@
 					<span
 						><b>Every server in {orgName}</b>
 						<span class="block text-[12.5px] text-mist-400"
-							>Goes on the organisation's ban list and is pushed to all its servers, now and in
+							>Goes on the organization's ban list and is pushed to all its servers, now and in
 							future.</span
 						></span
 					>

@@ -155,7 +155,7 @@
 		{
 			"id": 5,
 			"type": "stat",
-			"title": "Organisations",
+			"title": "Organizations",
 			"datasource": {
 				"type": "prometheus",
 				"uid": "warcon-prometheus"

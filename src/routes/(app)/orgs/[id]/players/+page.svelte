@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Everyone this organisation has seen on the servers you can open: every name they used, when
+	// Everyone this organization has seen on the servers you can open: every name they used, when
 	// and how much they played, and the ban, reserve and watch actions for someone who is not online.
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
@@ -113,7 +113,7 @@
 				steamId: p.steamId,
 				reason: ''
 			});
-			toast(`${p.name} is on the organisation's reserved slots.`, 'ok');
+			toast(`${p.name} is on the organization's reserved slots.`, 'ok');
 		} catch (err) {
 			toast(errorMessage(err), 'err');
 		} finally {
@@ -274,7 +274,7 @@
 								<button
 									class="btn btn-sm btn-danger"
 									disabled={busy === p.steamId || p.banned === 'org'}
-									title={p.banned === 'org' ? 'Already on the organisation ban list' : ''}
+									title={p.banned === 'org' ? 'Already on the organization ban list' : ''}
 									onclick={() => (banning = p)}>Ban</button
 								>
 							</div>
@@ -303,8 +303,8 @@
 	<p class="note">
 		Built from the sessions the worker records on servers you can open, so only players who have
 		joined one of them appear, and only the names they used there. Playtime is the sum of session
-		lengths. Ban goes on the organisation's ban list; Reserve on its reserved slots; Watch marks the
-		player across the organisation.
+		lengths. Ban goes on the organization's ban list; Reserve on its reserved slots; Watch marks the
+		player across the organization.
 	</p>
 </div>
 

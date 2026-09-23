@@ -320,7 +320,7 @@ interface PairRow extends Record<string, unknown> {
 }
 
 /**
- * A player's career over these servers (all time): rank here and across the organisation, the
+ * A player's career over these servers (all time): rank here and across the organization, the
  * streak, results by map and by faction with the kills seen there, and the last ten matches.
  */
 export async function loadCareer(

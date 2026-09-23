@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The organisation's ban list: its entries, where each stands on every server, and the add /
+	// The organization's ban list: its entries, where each stands on every server, and the add /
 	// remove controls.
 	import { invalidateAll } from '$app/navigation';
 	import { api, errorMessage } from '$lib/api';
@@ -99,7 +99,7 @@
 	<div>
 		<h2 class="text-lg font-semibold tracking-tight">Ban list</h2>
 		<p class="text-[13px] text-mist-400">
-			Bans kept by the organisation and pushed to every one of its servers. Bans added on a server
+			Bans kept by the organization and pushed to every one of its servers. Bans added on a server
 			directly stay local to it.
 		</p>
 	</div>

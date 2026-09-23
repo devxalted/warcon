@@ -325,12 +325,12 @@
 			return;
 		await run(
 			() => api('PATCH', orgPath, { suspended: true, reason: suspendReason.trim() }),
-			'Organisation suspended.',
+			'Organization suspended.',
 			false
 		);
 	}
 	function restore() {
-		void run(() => api('PATCH', orgPath, { suspended: false }), 'Organisation restored.', false);
+		void run(() => api('PATCH', orgPath, { suspended: false }), 'Organization restored.', false);
 	}
 	const ALLOW_KEY = {
 		status: 'allowPublicStatus',
@@ -547,7 +547,7 @@
 						.serverLimit}.
 				</p>
 				<div class="mt-3 border-t border-white/8 pt-3">
-					<span class="field-label">Public pages this organisation may switch on</span>
+					<span class="field-label">Public pages this organization may switch on</span>
 					{#each PUBLIC_FEATURES as feature (feature)}
 						<label class="flex items-center gap-2 py-1 text-[13px]">
 							<input
@@ -561,13 +561,13 @@
 					{/each}
 					<p class="note">
 						Allowed by default: the org's owners open each page per server. Unticking one closes
-						every such page in this organisation at once.
+						every such page in this organization at once.
 					</p>
 				</div>
 				<div class="mt-3 border-t border-white/8 pt-3">
 					{#if data.org.suspended}
 						<button type="button" class="btn btn-sm" onclick={restore} disabled={busy}
-							>Restore organisation</button
+							>Restore organization</button
 						>
 					{:else}
 						<div class="join w-full">
@@ -594,14 +594,14 @@
 			<span class="label-sm">Public pages</span>
 			{#if anyAllowed}
 				<p class="mb-3 text-[13px] text-mist-400">
-					This organisation may open a {PUBLIC_FEATURES.filter((f) => allowed(data.org, f))
+					This organization may open a {PUBLIC_FEATURES.filter((f) => allowed(data.org, f))
 						.map((f) => FEATURE_LABELS[f].toLowerCase())
 						.join(' and ')}. Switch each on per server from the server's <b>Settings</b> tab or its edit
 					dialog.
 				</p>
 			{:else}
 				<p class="mb-3 text-[13px] text-mist-400">
-					The site owner has closed the public pages for this organisation.
+					The site owner has closed the public pages for this organization.
 				</p>
 			{/if}
 			<label class="block"
@@ -689,7 +689,7 @@
 			</div>
 			<p class="mb-3 text-[13px] text-mist-400">
 				For a Discord bot or a script: a bearer token for the JSON API with its own capabilities and
-				servers. It can never manage the organisation. See the README for the request shape.
+				servers. It can never manage the organization. See the README for the request shape.
 			</p>
 			{#each data.keys as k (k.id)}
 				<div class="kv items-start">
@@ -904,7 +904,7 @@
 				<div>
 					<span class="field-label">Servers</span>
 					<label class="flex items-center gap-2 text-[13px]"
-						><input type="checkbox" bind:checked={d.allServers} /> Every server in the organisation</label
+						><input type="checkbox" bind:checked={d.allServers} /> Every server in the organization</label
 					>
 					{#if !d.allServers}
 						<div class="mt-1 space-y-1 pl-5">
@@ -959,7 +959,7 @@
 			<div>
 				<span class="field-label">Servers</span>
 				<label class="flex items-center gap-2 text-[13px]"
-					><input type="checkbox" bind:checked={d.allServers} /> Every server in the organisation, including
+					><input type="checkbox" bind:checked={d.allServers} /> Every server in the organization, including
 					ones added later</label
 				>
 				{#if !d.allServers}

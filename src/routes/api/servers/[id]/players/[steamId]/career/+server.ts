@@ -1,4 +1,4 @@
-// A player's career across the organisation's servers the caller can see: rank, streak, results
+// A player's career across the organization's servers the caller can see: rank, streak, results
 // by map and faction, the last ten matches. Same auth as the dossier.
 import { getEnv } from '$lib/server/env';
 import { apiJson, param, route } from '$lib/server/http';
