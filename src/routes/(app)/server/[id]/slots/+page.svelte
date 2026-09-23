@@ -1,7 +1,9 @@
 <script lang="ts">
 	// Who holds a reserved slot on this server: the roster as the game server holds it, with what
-	// the organisation's list contributes marked out, who is playing right now, and the controls
-	// to hand out or withdraw a slot here.
+	// the organisation's list and this server's own list contribute marked out, who is playing
+	// right now, and the controls to hand out or withdraw a slot here. A slot reserved here goes
+	// on the server's own list, so the panel applies it and lifts it at its expiry.
+	import { untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { api, rconGet, rconPost, errorMessage } from '$lib/api';
 	import { watchLive } from '$lib/live';
@@ -10,7 +12,11 @@
 	import { toast } from '$lib/toast.svelte';
 	import { confirmDialog } from '$lib/confirm.svelte';
 	import Badge from '$lib/components/Badge.svelte';
-	import { describeSync, STATE_TONE } from '$lib/lists';
+	import SteamName from '$lib/components/SteamName.svelte';
+	import SortHeader from '$lib/components/SortHeader.svelte';
+	import { TableSort, matches } from '$lib/table.svelte';
+	import { isSteamId, steamProfiles, type SteamProfile } from '$lib/steam-profiles';
+	import { describeSync, EXPIRY_OPTIONS, expiryIso, STATE_TONE } from '$lib/lists';
 	import type { ListSyncServer, ServerListsState } from '$lib/types';
 	import type { PageProps } from './$types';
 
@@ -29,66 +35,94 @@
 	});
 	/** SteamIDs the game server holds a slot for right now */
 	let reserved = $state<string[]>([]);
+	/**
+	 * DefaultReservedPlayerIds as the config document has it, on builds where the panel edits the
+	 * document (null otherwise). The live builds load it at start, so the two disagree between an
+	 * edit and the next restart: shown as "arrives at restart" / "leaves at restart".
+	 */
+	let document = $state<string[] | null>(null);
 	let reservedId = $state('');
+	let newNote = $state('');
+	let newExpiry = $state('0');
+	let newCustom = $state('');
 	let search = $state('');
 	let busy = $state(false);
 	/** who is on the server right now, by SteamID, with the name they are playing under */
 	let online = $state<Record<string, string>>({});
+	/** Steam personas for slot holders the panel has not seen play, where a key is configured */
+	let steam = $state<Record<string, SteamProfile | null>>({});
+	/** the persona for the id being typed into the reserve form: undefined while unknown */
+	let preview = $state<SteamProfile | null | undefined>(undefined);
+	let previewId = $derived(isSteamId(reservedId.trim()) ? reservedId.trim() : '');
 
 	let orgReserveCount = $derived(
 		data.orgLists?.lists.find((l) => l.kind === 'reserve')?.entryCount ?? null
 	);
 	let managedSlots = $derived(
-		Object.values(listState?.reserved ?? {}).filter((s) => s.managed).length
+		Object.values(listState?.reserved ?? {}).filter((s) => s.managed && s.scope === 'org').length
+	);
+	let hereSlots = $derived(
+		Object.values(listState?.reserved ?? {}).filter((s) => s.managed && s.scope === 'server').length
 	);
 	let pendingCount = $derived(
 		Object.values(listState?.reserved ?? {}).filter(
 			(s) => s.state === 'pending' || s.state === 'failed'
 		).length
 	);
-	let slotCap = $derived(listState?.sync?.reservedCap ?? null);
-	let slotPct = $derived(
-		slotCap ? Math.min(100, Math.round((reserved.length / slotCap) * 100)) : 0
-	);
+	/** MaxReservedSlots: player slots held back for reserved players; null until the worker read it */
+	let heldSlots = $state<number | null>(null);
+	/** the public cap the server reports (MaxPlayers less the held slots); null until seen */
+	let publicSlots = $state<number | null>(null);
 	let slotSource = (steamId: string) => listState?.reserved[steamId] ?? null;
 
 	/**
-	 * The roster: everyone holding a slot on this server, plus org entries still on their way.
-	 * People playing right now come first, then the org's hand-picked entries, then slots added
-	 * on this server, then members (who rank below everyone else when the cap bites).
+	 * The roster: everyone holding a slot on this server, plus list entries still on their way.
+	 * People playing right now come first, then the org's hand-picked entries, then this server's
+	 * own, then slots added outside the panel, then members.
 	 */
 	let slots = $derived.by(() => {
-		const ids = new Set([...reserved, ...Object.keys(listState?.reserved ?? {})]);
-		const rows = [...ids].map((steamId) => {
+		const ids = new Set([
+			...reserved,
+			...(document ?? []),
+			...Object.keys(listState?.reserved ?? {})
+		]);
+		const rows = [...ids].flatMap((steamId) => {
 			const src = slotSource(steamId);
+			const here = reserved.includes(steamId);
+			const inDocument = document?.includes(steamId) ?? here;
+			// A slot no org list manages that the server no longer reports (nor the document) is a
+			// stale copy, withdrawn from the official console or here a moment ago: nothing to show.
+			if (src && !src.managed && !here && !inDocument) return [];
 			return {
 				steamId,
 				src,
-				here: reserved.includes(steamId),
-				name: online[steamId] ?? src?.name ?? null,
+				here,
+				/** the document and the running server disagree until the server restarts */
+				pending: here && !inDocument ? 'leaves' : !here && inDocument ? 'arrives' : null,
+				name: online[steamId] ?? src?.name ?? steam[steamId]?.name ?? null,
 				online: steamId in online,
-				rank: src?.member ? 3 : src?.managed ? 1 : 2
+				rank: src?.member ? 4 : !src?.managed ? 3 : src.scope === 'server' ? 2 : 1
 			};
 		});
 		return rows.sort(
 			(a, b) =>
 				Number(b.online) - Number(a.online) ||
 				a.rank - b.rank ||
-				(b.src?.priority ?? 0) - (a.src?.priority ?? 0) ||
 				(a.name ?? '￿').localeCompare(b.name ?? '￿') ||
 				a.steamId.localeCompare(b.steamId)
 		);
 	});
-	let rows = $derived.by(() => {
-		const q = search.trim().toLowerCase();
-		return slots.filter(
-			(s) =>
-				!q ||
-				s.steamId.includes(q) ||
-				(s.name ?? '').toLowerCase().includes(q) ||
-				(s.src?.note ?? '').toLowerCase().includes(q)
-		);
+	/** a column sort on top of that order; clicking the active header a third time restores it */
+	const sort = new TableSort<(typeof slots)[number]>({
+		player: { by: (s) => s.name },
+		steamId: { by: (s) => s.steamId },
+		source: { by: (s) => s.rank },
+		note: { by: (s) => s.src?.note },
+		expires: { by: (s) => s.src?.expiresAt ?? '' }
 	});
+	let rows = $derived(
+		sort.sorted(slots.filter((s) => matches(search, s.steamId, s.name, s.src?.note)))
+	);
 	let onlineSlots = $derived(slots.filter((s) => s.online).length);
 	let localSlots = $derived(slots.filter((s) => s.here && !s.src?.managed).length);
 
@@ -123,7 +157,13 @@
 		}
 	}
 	async function refreshReserved() {
-		reserved = (await rconGet<{ reserved: string[] }>(id, 'reserved')).reserved;
+		const r = await rconGet<{ reserved: string[]; document?: string[] | null }>(
+			id,
+			'reserved',
+			viaConfig ? { document: 1 } : undefined
+		);
+		reserved = r.reserved;
+		document = viaConfig ? (r.document ?? null) : null;
 		void refreshListState();
 	}
 	const refreshAll = () => Promise.all([refreshReserved(), invalidateAll()]);
@@ -132,12 +172,36 @@
 		void id;
 		refreshReserved().catch((err) => toast(errorMessage(err), 'err'));
 	});
+	// Personas are looked up for the roster's ids alone, so a lookup never re-runs on its own result.
+	let slotIds = $derived(
+		[...new Set([...reserved, ...(document ?? []), ...Object.keys(listState?.reserved ?? {})])]
+			.sort()
+			.join(',')
+	);
+	$effect(() => {
+		const ids = slotIds.split(',').filter(Boolean);
+		untrack(() => void lookupSteam(ids));
+	});
+	async function lookupSteam(ids: string[]) {
+		const found = await steamProfiles(ids.filter((s) => !(s in steam)));
+		if (Object.keys(found).length) steam = { ...steam, ...found };
+	}
+	$effect(() => {
+		const want = previewId;
+		preview = undefined;
+		if (!want) return;
+		void steamProfiles([want]).then((r) => {
+			if (previewId === want && want in r) preview = r[want];
+		});
+	});
 	$effect(() => {
 		void id;
 		return watchLive([id], (v) => {
 			const next: Record<string, string> = {};
 			for (const p of v.players) next[p.steamId] = p.name;
 			online = next;
+			heldSlots = v.reservedSlots;
+			publicSlots = v.status?.maxPlayers ?? null;
 		});
 	});
 
@@ -156,20 +220,49 @@
 			busy = false;
 		}
 	}
-	const addSlot = () =>
-		act(
-			'reservedAdd',
-			{ steamId: reservedId.trim(), viaConfig },
-			{
-				after: async () => {
-					reservedId = '';
-					await refreshReserved();
-				}
-			}
-		);
+	/** Reserves through the server's own list; the panel applies it now and lifts it at the expiry. */
+	async function addSlot() {
+		const steamId = reservedId.trim();
+		busy = true;
+		try {
+			const res = await api<{ sync: ListSyncServer }>(
+				'POST',
+				`/api/servers/${encodeURIComponent(id)}/lists/reserve/entries`,
+				{ steamId, reason: newNote.trim(), expiresAt: expiryIso(newExpiry, newCustom) }
+			);
+			toast(describeSync({ servers: [res.sync] }, `Reserved a slot for ${steamId}.`), 'ok', 8000);
+			reservedId = '';
+			newNote = '';
+			newExpiry = '0';
+			newCustom = '';
+			await refreshReserved();
+		} catch (err) {
+			toast(errorMessage(err), 'err');
+		} finally {
+			busy = false;
+		}
+	}
 	async function removeSlot(steamId: string, name: string | null) {
 		const src = slotSource(steamId);
 		const who = name ? `${name} (${steamId})` : steamId;
+		if (src?.managed && src.scope === 'server') {
+			if (!(await confirmDialog(`Withdraw the reserved slot for ${who}?`, { okLabel: 'Do it' })))
+				return;
+			busy = true;
+			try {
+				const res = await api<{ sync: ListSyncServer }>(
+					'DELETE',
+					`/api/servers/${encodeURIComponent(id)}/lists/reserve/entries/${steamId}`
+				);
+				toast(describeSync({ servers: [res.sync] }, `Withdrew the slot for ${who}.`), 'ok', 8000);
+				await refreshReserved();
+			} catch (err) {
+				toast(errorMessage(err), 'err');
+			} finally {
+				busy = false;
+			}
+			return;
+		}
 		await act(
 			'reservedRemove',
 			{ steamId, viaConfig },
@@ -189,8 +282,7 @@
 		<span class="label-sm">Slots held</span>
 		<div class="flex items-baseline gap-2">
 			<span class="font-display text-[34px] leading-none font-semibold tabular"
-				>{reserved.length}{#if slotCap !== null}<span class="text-mist-600">&nbsp;/ {slotCap}</span
-					>{/if}</span
+				>{reserved.length}</span
 			>
 			{#if onlineSlots}
 				<span class="ml-auto inline-flex items-center gap-1.5 text-[12.5px] text-ok"
@@ -198,18 +290,19 @@
 				>
 			{/if}
 		</div>
-		{#if slotCap !== null}
-			<div class="mt-3 progress"><span class="progress-bar" style="width: {slotPct}%"></span></div>
-			<p class="note">
-				{#if slotCap - reserved.length > 0}
-					{slotCap - reserved.length} more can be handed out before this server's cap (MaxReservedSlots).
-				{:else}
-					The cap is full: higher-priority organisation entries push out lower ones.
-				{/if}
-			</p>
-		{:else}
-			<p class="note">This server's cap (MaxReservedSlots) is not known until the first sync.</p>
+		{#if heldSlots !== null}
+			<div class="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+				<span
+					><span class="text-mist-400">Player slots</span>
+					<b>{publicSlots ?? '—'}</b> public + <b>{heldSlots}</b> reserved{#if publicSlots !== null}
+						= {publicSlots + heldSlots}{/if}</span
+				>
+			</div>
 		{/if}
+		<p class="note">
+			Anyone on the list skips the join queue, and the list has no length limit. MaxReservedSlots
+			only sets how many player slots are held back for them.
+		</p>
 	</div>
 
 	<div class="panel">
@@ -232,7 +325,8 @@
 			{:else}
 				<span><b>{managedSlots}</b> applied here by the organisation</span>
 			{/if}
-			<span><b>{localSlots}</b> local to this server</span>
+			<span><b>{hereSlots}</b> reserved here</span>
+			<span><b>{localSlots}</b> added outside the panel</span>
 			{#if pendingCount}<Badge tone="warn">{pendingCount} pending or failed</Badge>{/if}
 		</div>
 		<div class="mt-1 text-[12.5px] text-mist-400">
@@ -250,39 +344,77 @@
 	<div class="flex flex-col panel">
 		<span class="label-sm">Reserve a slot here</span>
 		<form
-			class="join join-wrap w-full"
+			class="space-y-2"
 			onsubmit={(e) => {
 				e.preventDefault();
 				void addSlot();
 			}}
 		>
+			<div class="join w-full">
+				<input
+					class="input font-mono"
+					type="text"
+					inputmode="numeric"
+					placeholder="SteamID64…"
+					maxlength="17"
+					required
+					disabled={!canReserve}
+					bind:value={reservedId}
+				/>
+				<button
+					type="submit"
+					class="btn btn-primary"
+					disabled={!canReserve || busy || !isSteamId(reservedId.trim())}>Reserve</button
+				>
+			</div>
+			{#if previewId && preview}
+				<div class="text-[12.5px]"><SteamName profile={preview} /></div>
+			{:else if previewId && preview === null}
+				<div class="text-[12.5px] text-mist-600">No Steam profile for that id.</div>
+			{/if}
 			<input
-				class="input font-mono"
+				class="input"
 				type="text"
-				inputmode="numeric"
-				placeholder="SteamID64…"
-				maxlength="17"
-				required
+				maxlength="200"
+				placeholder="Note, e.g. donor, clan member (optional)"
 				disabled={!canReserve}
-				bind:value={reservedId}
+				bind:value={newNote}
 			/>
-			<button type="submit" class="btn btn-primary" disabled={!canReserve || !reservedId.trim()}
-				>Reserve</button
-			>
+			<div class="flex flex-wrap gap-2">
+				<label class="block sm:w-40"
+					><span class="field-label">Expires</span><select
+						class="input"
+						disabled={!canReserve}
+						bind:value={newExpiry}
+					>
+						{#each EXPIRY_OPTIONS as [value, label] (value)}
+							<option {value}>{label}</option>
+						{/each}
+					</select></label
+				>
+				{#if newExpiry === 'custom'}
+					<label class="block sm:flex-1"
+						><span class="field-label">Until (local time)</span><input
+							class="input"
+							type="datetime-local"
+							bind:value={newCustom}
+							required
+						/></label
+					>
+				{/if}
+			</div>
 		</form>
 		<p class="note">
-			{#if viaConfig}
-				This server build has no live reserved-slot routes, so slots are written to
-				+DefaultReservedPlayerIds in its config document (permanent only).
-				{#if listState?.canEditOrg}To reserve a slot on every server, use the organisation list.{/if}
-			{:else if !data.features.reservedSlots}
+			{#if !data.features.reservedSlots && !viaConfig}
 				This server build has no live reserved-slot routes and no writable config document, so
 				nothing can be reserved from here.
-			{:else if listState?.canEditOrg}
-				Written to this server's ServerSettings.ini only. To reserve a slot on every server, use the
-				organisation list.
 			{:else}
-				Written to this server's ServerSettings.ini only.
+				On this server only; a slot with an expiry is withdrawn by the panel when the time comes.
+				{#if viaConfig}
+					This build has no live reserved-slot routes, so the panel writes the slot to
+					+DefaultReservedPlayerIds in its config document, taken up at the next restart.
+				{/if}
+				{#if listState?.canEditOrg}To reserve a slot on every server, use the organisation list.{/if}
 			{/if}
 		</p>
 	</div>
@@ -308,13 +440,16 @@
 	{#if slots.length}
 		<div class="table-wrap">
 			<table>
-				<thead
-					><tr
-						><th>Player</th><th>SteamID64</th><th>Source</th><th>Note</th><th class="num"
-							>Priority</th
-						><th></th></tr
-					></thead
-				>
+				<thead>
+					<tr>
+						<SortHeader {sort} key="player">Player</SortHeader>
+						<SortHeader {sort} key="steamId">SteamID64</SortHeader>
+						<SortHeader {sort} key="source">Source</SortHeader>
+						<SortHeader {sort} key="note">Note</SortHeader>
+						<SortHeader {sort} key="expires">Expires</SortHeader>
+						<th></th>
+					</tr>
+				</thead>
 				<tbody>
 					{#each rows as s (s.steamId)}
 						<tr class={s.src?.managed && !s.here ? 'opacity-70' : ''}>
@@ -326,6 +461,13 @@
 											: 'bg-ink-700'}"
 										title={s.online ? 'Playing now' : 'Not on the server right now'}
 									></span>
+									{#if steam[s.steamId]?.avatar}<img
+											src={steam[s.steamId]?.avatar}
+											alt=""
+											class="size-5 shrink-0 rounded-sm"
+											loading="lazy"
+											referrerpolicy="no-referrer"
+										/>{/if}
 									<a
 										href="/server/{encodeURIComponent(id)}/players/{s.steamId}"
 										class="truncate font-medium hover:text-accent hover:underline {s.name
@@ -342,22 +484,39 @@
 									<Badge tone="accent">member</Badge>
 								{:else if s.src?.managed}
 									<Badge tone={STATE_TONE[s.src.state]}
-										>org{s.src.state === 'applied' ? '' : ` · ${s.src.state}`}</Badge
+										>{s.src.scope === 'server' ? 'here' : 'org'}{s.src.state === 'applied'
+											? ''
+											: ` · ${s.src.state}`}</Badge
 									>
 								{:else}
 									<Badge>local</Badge>
+								{/if}
+								{#if s.pending === 'leaves'}
+									<Badge
+										tone="warn"
+										class="ml-1"
+										title="Removed from the config document; the running server keeps the slot until it restarts"
+										>leaves at restart</Badge
+									>
+								{:else if s.pending === 'arrives'}
+									<Badge
+										tone="warn"
+										class="ml-1"
+										title="In the config document; the running server takes the slot up when it restarts"
+										>arrives at restart</Badge
+									>
 								{/if}
 							</td>
 							<td
 								>{#if s.src?.note}{s.src.note}{:else}<span class="text-mist-600">—</span>{/if}</td
 							>
-							<td class="num text-mist-400"
-								>{#if s.src?.member}<span class="text-mist-600">member</span
-									>{:else if s.src?.priority !== null && s.src?.priority !== undefined}{s.src
-										.priority}{:else}<span class="text-mist-600">—</span>{/if}</td
+							<td class="whitespace-nowrap text-mist-400"
+								>{#if s.src?.expiresAt}{fmtTime(s.src.expiresAt)}{:else}<span class="text-mist-600"
+										>—</span
+									>{/if}</td
 							>
 							<td class="text-right">
-								{#if canReserve && s.here}
+								{#if canReserve && ((s.src?.managed && s.src.scope === 'server') || ((s.here || s.pending === 'arrives') && s.pending !== 'leaves'))}
 									<button
 										type="button"
 										class="btn btn-sm btn-ghost"
@@ -379,15 +538,17 @@
 		</div>
 		<p class="note">
 			<Badge tone="ok">org</Badge> and <Badge tone="accent">member</Badge> slots come from the organisation
-			and are handed back if withdrawn here; <Badge>local</Badge> slots were reserved on this server and
-			the panel leaves them alone. When a server's cap is full, higher priority wins and members rank
-			below every explicit entry.
+			and are handed back if withdrawn here; <Badge tone="ok">here</Badge> slots were reserved on this
+			server through the panel, which lifts them at their expiry; <Badge>local</Badge> slots were added
+			outside the panel and it leaves them alone.{#if viaConfig}
+				This build reads its reserved list from the config document at start, so a slot reserved or
+				withdrawn here is marked until the server restarts.{/if}
 		</p>
 	{:else}
 		<div class="callout mb-0">
 			<b>Nobody holds a reserved slot here yet.</b>
 			<span class="block text-mist-400"
-				>A reserved slot lets your admins, donors and clan members join even when the server is
+				>A reserved slot lets your admins, donors and clan members skip the queue when the server is
 				full. Reserve one above{#if listState?.canEditOrg}, or hand them out across every server
 					from the organisation's list{/if}.</span
 			>

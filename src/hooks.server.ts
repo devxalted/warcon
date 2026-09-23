@@ -4,8 +4,10 @@ import { json, redirect } from '@sveltejs/kit';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { authConfigured, getAuth, initAuth } from '$lib/server/auth';
 import { keyUser, toSessionUser } from '$lib/server/access';
+import { enrolmentPolicy, statusFor } from '$lib/server/enrolment';
 import { resolveBearer } from '$lib/server/apikeys';
 import { looksLikeOurToken, parseBearer } from '$lib/server/apikeys-core';
+import { isApiRequest } from '$lib/server/api-path';
 import { assertRate } from '$lib/server/ratelimit';
 import { getEnv, initEnv } from '$lib/server/env';
 import { encryptionKey } from '$lib/server/crypto';
@@ -14,6 +16,7 @@ import {
 	apiError,
 	CLIENT_IP_HEADER,
 	clientIp,
+	forLog,
 	normalizeError,
 	resolveClientIp
 } from '$lib/server/http';
@@ -23,6 +26,8 @@ import { localGateway } from '$lib/server/gateway-local';
 import { connectRemoteGateway } from '$lib/server/gateway-remote';
 import { loadSettings } from '$lib/server/settings';
 import { beginShutdown } from '$lib/server/shutdown';
+import { httpRequests, httpRequestSeconds, routeLabel } from '$lib/server/metrics';
+import { registerFleetCollector } from '$lib/server/metrics-fleet';
 
 const SECURITY_HEADERS: Record<string, string> = {
 	'x-content-type-options': 'nosniff',
@@ -32,11 +37,13 @@ const SECURITY_HEADERS: Record<string, string> = {
 	'x-robots-tag': 'noindex, nofollow'
 };
 
-// Routes a user who must change their password may still reach.
-const PASSWORD_GATE_EXEMPT = /^\/(account|sign-out|join|api\/auth)(\/|$)/;
+// Routes a user who must change their password, or fix their sign-in methods, may still reach.
+const PASSWORD_GATE_EXEMPT = /^\/(account|sign-out|join|api\/auth|api\/passkeys|auth\/steam)(\/|$)/;
 // The only Better Auth routes a browser must reach: the OAuth callback and its error page.
 const AUTH_PUBLIC = /^\/api\/auth\/(callback\/[^/]+|error|ok)$/;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** Where the game posts kill feed batches (src/routes/api/ingest/events). */
+const FEED_PATH = '/api/ingest/';
 
 /** Reads config, opens the database, applies migrations, builds Better Auth and starts the poller once per process. */
 export const init: ServerInit = async () => {
@@ -63,6 +70,7 @@ export const init: ServerInit = async () => {
 		setGateway(localGateway);
 		startPoller(env, 'all');
 	}
+	registerFleetCollector(env);
 	installShutdown(env);
 };
 
@@ -93,7 +101,29 @@ function installShutdown(env: Awaited<ReturnType<typeof initEnv>>): void {
 	});
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
+/** Counts and times every answer by route id, including the early refusals and thrown redirects. */
+export const handle: Handle = async (input) => {
+	const started = performance.now();
+	let status = 500;
+	try {
+		const res = await handleRequest(input);
+		status = res.status;
+		return res;
+	} catch (err) {
+		// SvelteKit turns a thrown redirect or HttpError into the response; anything else is a 500.
+		const thrown = err as { status?: unknown };
+		if (typeof thrown?.status === 'number') status = thrown.status;
+		throw err;
+	} finally {
+		if (!building) {
+			const route = routeLabel(input.event.route.id);
+			httpRequests.inc({ route, method: input.event.request.method, status: String(status) });
+			httpRequestSeconds.observe({ route }, (performance.now() - started) / 1000);
+		}
+	}
+};
+
+const handleRequest: Handle = async ({ event, resolve }) => {
 	event.locals.user = null;
 	event.locals.session = null;
 	event.locals.apiKey = null;
@@ -115,6 +145,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	const auth = getAuth();
 	event.locals.auth = auth;
 	const path = event.url.pathname;
+	const isApi = isApiRequest(path, event.route.id);
 	const isAuthApi = path.startsWith('/api/auth');
 
 	// Every Better Auth call the panel makes is server-side (auth.api.*) from a form action or API
@@ -128,7 +159,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// session (cookies are ignored) and for the CSRF header (a browser cannot attach a bearer to a
 	// cross-site request). A bad key never falls back to the cookie: it is simply refused.
 	const authorization = event.request.headers.get('authorization');
-	if (path.startsWith('/api/') && !isAuthApi && looksLikeOurToken(authorization)) {
+	if (isApi && !isAuthApi && looksLikeOurToken(authorization)) {
 		try {
 			const token = parseBearer(authorization);
 			if (!token) throw new ApiError(401, 'Malformed API key.', 'invalid_api_key');
@@ -149,9 +180,12 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	// CSRF guard for the JSON API: every mutation must carry the custom header (browsers never add
 	// it to cross-site form posts or simple requests). Better Auth checks origins for its own routes.
+	// The kill feed is the game process posting with its own bearer, which no browser form can
+	// attach; the route checks that token itself.
 	if (
-		path.startsWith('/api/') &&
+		isApi &&
 		!isAuthApi &&
+		!path.startsWith(FEED_PATH) &&
 		!event.locals.apiKey &&
 		!SAFE_METHODS.has(event.request.method)
 	) {
@@ -175,11 +209,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 				};
 			}
 		} catch (err) {
-			console.error('session lookup failed:', err instanceof Error ? err.stack : err);
+			console.error('session lookup failed:', forLog(err));
 		}
 
 		if (event.locals.user?.mustChangePassword && !PASSWORD_GATE_EXEMPT.test(path)) {
-			if (path.startsWith('/api/')) {
+			if (isApi) {
 				return json(
 					{
 						ok: false,
@@ -190,6 +224,30 @@ export const handle: Handle = async ({ event, resolve }) => {
 			}
 			redirect(303, '/account?force=1');
 		}
+
+		// The sign-in rules ($lib/enrolment), for accounts the "Sign-in rules" setting enforces them on:
+		// once the grace period is over, an account that still fails them can only reach the account
+		// page, where every method can be added. For the rest the rules stay advice (a banner).
+		if (
+			event.locals.user &&
+			statusFor(event.locals.user).due &&
+			!PASSWORD_GATE_EXEMPT.test(path) &&
+			(await enrolmentPolicy(env, event.locals.user)).enforced
+		) {
+			if (isApi) {
+				return json(
+					{
+						ok: false,
+						error: {
+							message: 'Finish setting up your sign-in methods first.',
+							code: 'enrolment_required'
+						}
+					},
+					{ status: 403 }
+				);
+			}
+			redirect(303, '/account?enrol=1');
+		}
 	}
 
 	return svelteKitHandler({ event, resolve: secured, auth, building });
@@ -198,7 +256,6 @@ export const handle: Handle = async ({ event, resolve }) => {
 export const handleError: HandleServerError = ({ error, status, message }) => {
 	const known = normalizeError(error);
 	if (known) return { message: known.message, code: known.code || undefined };
-	if (status !== 404)
-		console.error('unhandled', status, error instanceof Error ? error.stack : error);
+	if (status !== 404) console.error('unhandled', status, forLog(error));
 	return { message: status === 404 ? 'Not found.' : message || 'Internal error.' };
 };

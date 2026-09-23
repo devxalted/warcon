@@ -2,6 +2,7 @@
 // (bun run db:generate); the app applies them at startup. Keep it free of SvelteKit imports.
 import { sql } from 'drizzle-orm';
 import {
+	bigint,
 	bigserial,
 	boolean,
 	customType,
@@ -59,7 +60,17 @@ export const user = pgTable('user', {
 	/** the member's own SteamID64, so an org can hand its members a reserved slot */
 	steamId: text('steam_id').unique(),
 	/** the organisation the panel opens on (dashboard, switcher, Servers); null = every org */
-	defaultOrgId: text('default_org_id').references(() => organizations.id, { onDelete: 'set null' })
+	defaultOrgId: text('default_org_id').references(() => organizations.id, { onDelete: 'set null' }),
+	// two-factor plugin
+	twoFactorEnabled: boolean('two_factor_enabled').default(false),
+	// warcon sign-in policy (see enrolment.ts): recomputed whenever a sign-in method changes
+	/** the account meets the sign-in rules (two ways in, a second factor on the password, ...) */
+	authComplete: boolean('auth_complete').notNull().default(false),
+	/** first sign-in since the rules arrived; the grace period counts from here */
+	authGraceStartedAt: ts('auth_grace_started_at'),
+	/** sha-256 of the one-time recovery key; null = none issued (or the last one was used) */
+	recoveryKeyHash: text('recovery_key_hash'),
+	recoveryKeyAt: ts('recovery_key_at')
 });
 
 export const session = pgTable(
@@ -119,6 +130,48 @@ export const verification = pgTable(
 	(t) => [index('verification_identifier_idx').on(t.identifier)]
 );
 
+/** two-factor plugin: one TOTP secret and the (encrypted) backup codes per user */
+export const twoFactor = pgTable(
+	'two_factor',
+	{
+		id: text('id').primaryKey(),
+		secret: text('secret').notNull(),
+		backupCodes: text('backup_codes').notNull(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		/** false between "enable" and the first code the user proves they can produce */
+		verified: boolean('verified').default(true),
+		failedVerificationCount: integer('failed_verification_count').default(0),
+		lockedUntil: ts('locked_until')
+	},
+	(t) => [index('two_factor_user_id_idx').on(t.userId), index('two_factor_secret_idx').on(t.secret)]
+);
+
+/** passkey plugin: WebAuthn credentials; a user may hold several (phone, laptop, security key) */
+export const passkey = pgTable(
+	'passkey',
+	{
+		id: text('id').primaryKey(),
+		name: text('name'),
+		publicKey: text('public_key').notNull(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		credentialID: text('credential_id').notNull(),
+		counter: integer('counter').notNull(),
+		deviceType: text('device_type').notNull(),
+		backedUp: boolean('backed_up').notNull(),
+		transports: text('transports'),
+		createdAt: ts('created_at'),
+		aaguid: text('aaguid')
+	},
+	(t) => [
+		index('passkey_user_id_idx').on(t.userId),
+		index('passkey_credential_id_idx').on(t.credentialID)
+	]
+);
+
 // ---- Warcon ------------------------------------------------------------------------------------
 
 /** A clan / community. Servers belong to exactly one org; people join through invite links. */
@@ -134,6 +187,17 @@ export const organizations = pgTable('organizations', {
 	suspendedReason: text('suspended_reason').notNull().default(''),
 	/** members who set a SteamID on their account get a reserved slot on every org server */
 	membersReserved: boolean('members_reserved').notNull().default(false),
+	/**
+	 * Site-owner allowances: what this org's owners may switch on per server, allowed unless the
+	 * site owner withdraws it. Each public surface needs the allowance and the server's own
+	 * switch; $lib/features computes the effective set.
+	 */
+	allowPublicStatus: boolean('allow_public_status').notNull().default(true),
+	allowPublicLeaderboards: boolean('allow_public_leaderboards').notNull().default(true),
+	/** a discord.gg or discord.com/invite link, shown as a button on the org's public pages; '' = none */
+	discordInviteUrl: text('discord_invite_url').notNull().default(''),
+	/** what a banned player is shown: the reason and facts about the ban, see $lib/ban-message */
+	banMessage: text('ban_message').notNull().default('{reason}'),
 	createdAt: ts('created_at').notNull().defaultNow(),
 	updatedAt: ts('updated_at').notNull().defaultNow()
 });
@@ -257,6 +321,18 @@ export const servers = pgTable('servers', {
 	sortOrder: integer('sort_order').notNull().default(0),
 	/** Set when the site owner saved the target: private addresses (same box, LAN) are permitted. */
 	allowPrivate: boolean('allow_private').notNull().default(false),
+	/**
+	 * The kill feed token the game sends as its bearer (`[WDServerFeed] Token`), AES-GCM like the
+	 * password so it can be shown again and written into the config document; null = no feed.
+	 */
+	feedTokenEnc: text('feed_token_enc'),
+	/** sha256 of the token: how a feed batch finds its server */
+	feedTokenHash: text('feed_token_hash').unique(),
+	/** the org owner's switches for the public pages; effective only with the org's allowance ($lib/features) */
+	publicStatus: boolean('public_status').notNull().default(false),
+	publicLeaderboards: boolean('public_leaderboards').notNull().default(false),
+	/** the public status page also shows the last kills (needs the feed and the status page on) */
+	publicKills: boolean('public_kills').notNull().default(false),
 	createdBy: text('created_by'),
 	createdAt: ts('created_at').notNull().defaultNow(),
 	updatedAt: ts('updated_at').notNull().defaultNow()
@@ -306,7 +382,6 @@ export const auditLog = pgTable(
 		outcome: text('outcome', { enum: ['ok', 'error', 'denied'] }).notNull(),
 		status: integer('status'),
 		message: text('message').notNull().default(''),
-		ip: text('ip').notNull().default(''),
 		userAgent: text('user_agent').notNull().default(''),
 		durationMs: integer('duration_ms')
 	},
@@ -320,7 +395,7 @@ export const auditLog = pgTable(
 );
 
 export const loginAttempts = pgTable('login_attempts', {
-	/** 'u:<username>' or 'ip:<address>' */
+	/** 'u:<username>', or 'ip:' / 'signup:' + a keyed hash of the address (addressKey in http.ts) */
 	key: text('key').primaryKey(),
 	count: integer('count').notNull().default(0),
 	firstAt: ts('first_at').notNull(),
@@ -368,7 +443,10 @@ export const playerSessions = pgTable(
 		leftAt: ts('left_at'),
 		kills: integer('kills').notNull().default(0),
 		deaths: integer('deaths').notNull().default(0),
-		cash: integer('cash').notNull().default(0)
+		cash: integer('cash').notNull().default(0),
+		/** seconds of this session spent with the player count at or under the server's seeding
+		 *  threshold (0 while no seeding rule is on); what a Seeding reward rule adds up */
+		seedSeconds: integer('seed_seconds').notNull().default(0)
 	},
 	(t) => [
 		index('player_sessions_open_idx').on(t.serverId, t.leftAt),
@@ -396,6 +474,55 @@ export const matches = pgTable(
 	},
 	(t) => [index('matches_server_idx').on(t.serverId, t.startedAt)]
 );
+
+/**
+ * One row per kill the game's feed delivered (`[WDServerFeed]`, see docs/wardogs-api.md), with
+ * what Warcon knew at receipt: the open match and both players' factions. History: never pruned;
+ * a TimescaleDB hypertable with compression where the extension exists (migration 0019).
+ */
+export const kills = pgTable(
+	'kills',
+	{
+		/** when Warcon received it, a second or two after the kill */
+		ts: ts('ts').notNull(),
+		serverId: text('server_id').notNull(),
+		eventId: text('event_id').notNull(),
+		/** the game's serverId: a per-boot instance id, not the join code */
+		instanceId: text('instance_id').notNull(),
+		/** the game's matchId: also per boot, as observed */
+		matchId: text('match_id').notNull(),
+		/** matches.id open on this server at receipt */
+		matchRow: bigint('match_row', { mode: 'number' }),
+		/** seconds on the match clock */
+		eventTime: real('event_time').notNull(),
+		map: text('map').notNull(),
+		/** null: the environment */
+		killerSteamId: text('killer_steam_id'),
+		killerName: text('killer_name'),
+		killerFaction: text('killer_faction'),
+		victimSteamId: text('victim_steam_id').notNull(),
+		victimName: text('victim_name').notNull(),
+		victimFaction: text('victim_faction'),
+		/** the raw weapon or vehicle tag, e.g. Id.Item.AK74M */
+		cause: text('cause'),
+		distanceM: real('distance_m'),
+		headshot: boolean('headshot').notNull().default(false),
+		/** the Suicide tag, or killer = victim */
+		suicide: boolean('suicide').notNull().default(false),
+		/** both factions known and equal, killer ≠ victim */
+		teamKill: boolean('team_kill').notNull().default(false),
+		/** the other context tags, short form: Penetration, Ricochet, RoadKill, VehicleExplosion, Falling, WeaponMelee */
+		tags: jsonb('tags').notNull()
+	},
+	(t) => [
+		// Not unique: a hypertable's unique indexes must include ts, so dedupe is a lookup (feed.ts).
+		index('kills_event_idx').on(t.eventId),
+		index('kills_server_ts_idx').on(t.serverId, t.ts.desc()),
+		index('kills_killer_idx').on(t.killerSteamId, t.ts.desc()),
+		index('kills_victim_idx').on(t.victimSteamId, t.ts.desc())
+	]
+);
+export type KillRow = typeof kills.$inferSelect;
 
 // ---- Player intelligence: org-scoped notes and watchlist, cached Steam data, ban snapshots ------
 
@@ -447,6 +574,12 @@ export const steamProfiles = pgTable('steam_profiles', {
 	daysSinceLastBan: integer('days_since_last_ban'),
 	communityBanned: boolean('community_banned').notNull().default(false),
 	economyBan: text('economy_ban').notNull().default('none'),
+	/** unknown, public, private, or partial (only the first 200 friends checked) */
+	friendsState: text('friends_state').notNull().default('unknown'),
+	friendsTotal: integer('friends_total').notNull().default(0),
+	friendsChecked: integer('friends_checked').notNull().default(0),
+	bannedFriends: integer('banned_friends').notNull().default(0),
+	friendsCheckedAt: ts('friends_checked_at'),
 	fetchedAt: ts('fetched_at').notNull().defaultNow(),
 	error: text('error').notNull().default('')
 });
@@ -481,7 +614,19 @@ export const triggers = pgTable(
 			.references(() => servers.id, { onDelete: 'cascade' }),
 		orgId: text('org_id').notNull(),
 		kind: text('kind', {
-			enum: ['welcome', 'faction_change', 'broadcast', 'empty_reset', 'risk_kick']
+			enum: [
+				'welcome',
+				'faction_change',
+				'broadcast',
+				'empty_reset',
+				'risk_kick',
+				'ping_kick',
+				'restart_notice',
+				'team_kill',
+				'seed_reward',
+				'match_broadcast',
+				'name_filter'
+			]
 		}).notNull(),
 		name: text('name').notNull(),
 		enabled: boolean('enabled').notNull().default(false),
@@ -524,6 +669,12 @@ export const webhooks = pgTable(
 		statusStyle: text('status_style', { enum: ['banner', 'compact', 'scoreboard'] })
 			.notNull()
 			.default('banner'),
+		/** seconds between edits of one card (30-300); the per-server spacing applies on top */
+		statusIntervalS: integer('status_interval_s').notNull().default(60),
+		/** which links the card carries: the public status page, the public leaderboard, the panel */
+		linkStatus: boolean('link_status').notNull().default(true),
+		linkLeaderboard: boolean('link_leaderboard').notNull().default(true),
+		linkPanel: boolean('link_panel').notNull().default(false),
 		/** server id -> the Discord id of its message, once posted */
 		statusMessages: jsonb('status_messages'),
 		statusSentAt: ts('status_sent_at'),
@@ -539,7 +690,10 @@ export const webhooks = pgTable(
 
 // ---- Organisation lists: bans and reserved slots kept in the panel and pushed to every server --
 
-/** A ban list or reserved-slot list an org owns. Servers subscribe through server_lists. */
+/**
+ * A ban list or reserved-slot list an org owns. Servers subscribe through server_lists: every org
+ * list to every org server, and a server's own list (server_id set) to that server alone.
+ */
 export const lists = pgTable(
 	'lists',
 	{
@@ -547,6 +701,8 @@ export const lists = pgTable(
 		orgId: text('org_id')
 			.notNull()
 			.references(() => organizations.id, { onDelete: 'cascade' }),
+		/** set on a list that belongs to one server (its own reserved slots); null for the org's */
+		serverId: text('server_id').references(() => servers.id, { onDelete: 'cascade' }),
 		kind: text('kind', { enum: ['ban', 'reserve'] }).notNull(),
 		name: text('name').notNull().default('Default'),
 		/** reserved for sharing between orgs; unused for now */
@@ -555,7 +711,14 @@ export const lists = pgTable(
 		createdAt: ts('created_at').notNull().defaultNow(),
 		updatedAt: ts('updated_at').notNull().defaultNow()
 	},
-	(t) => [uniqueIndex('lists_org_kind_name_uidx').on(t.orgId, t.kind, t.name)]
+	(t) => [
+		uniqueIndex('lists_org_kind_name_uidx')
+			.on(t.orgId, t.kind, t.name)
+			.where(sql`${t.serverId} is null`),
+		uniqueIndex('lists_server_kind_uidx')
+			.on(t.serverId, t.kind)
+			.where(sql`${t.serverId} is not null`)
+	]
 );
 
 /** One player on a list. Removal is soft so history and audit stay intact; re-adding inserts a new row. */
@@ -570,8 +733,6 @@ export const listEntries = pgTable(
 		reason: text('reason').notNull().default(''),
 		/** bans only: lifted automatically after this */
 		expiresAt: ts('expires_at'),
-		/** reserved slots only: higher wins when a server's MaxReservedSlots is hit */
-		priority: integer('priority').notNull().default(0),
 		addedBy: text('added_by'),
 		addedByName: text('added_by_name').notNull().default(''),
 		addedAt: ts('added_at').notNull().defaultNow(),
@@ -589,7 +750,7 @@ export const listEntries = pgTable(
 	]
 );
 
-/** Which lists apply to which server (every org list to every org server, today). */
+/** Which lists apply to which server: every org list to every org server, a server's own to itself. */
 export const serverLists = pgTable(
 	'server_lists',
 	{
@@ -643,15 +804,12 @@ export const serverListState = pgTable(
 	]
 );
 
-/** Per-server sync bookkeeping: last run, the reserved-slot cap the server reported, last error. */
+/** Per-server sync bookkeeping: last run and last error. */
 export const serverListSync = pgTable('server_list_sync', {
 	serverId: text('server_id')
 		.primaryKey()
 		.references(() => servers.id, { onDelete: 'cascade' }),
 	syncedAt: ts('synced_at'),
-	reservedCap: integer('reserved_cap'),
-	reservedUsed: integer('reserved_used').notNull().default(0),
-	capCheckedAt: ts('cap_checked_at'),
 	lastError: text('last_error').notNull().default(''),
 	updatedAt: ts('updated_at').notNull().defaultNow()
 });
@@ -674,6 +832,10 @@ export const serverLive = pgTable('server_live', {
 	build: text('build').notNull().default(''),
 	/** GET /v1/server-id on builds that serve it (CL-501228+): the join code; '' otherwise */
 	gameServerId: text('game_server_id').notNull().default(''),
+	/** when the game process started, from uptimeSeconds on GET /v1/health; null until read or unserved */
+	startedAt: ts('started_at'),
+	/** MaxReservedSlots from the config document: player slots held back for reserved players; null until read */
+	reservedSlots: integer('reserved_slots'),
 	/** Status as the action registry shapes it */
 	status: jsonb('status'),
 	/** Player[] as the action registry shapes it */
@@ -683,6 +845,8 @@ export const serverLive = pgTable('server_live', {
 	playersAt: ts('players_at'),
 	/** last attempt, successful or not */
 	observedAt: ts('observed_at'),
+	/** when the last kill feed batch arrived (written by the web process that took it) */
+	feedAt: ts('feed_at'),
 	updatedAt: ts('updated_at').notNull().defaultNow()
 });
 

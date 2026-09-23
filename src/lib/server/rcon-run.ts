@@ -10,6 +10,8 @@ import { GameError } from './rcon';
 import { gateway } from './gateway';
 import { assertRate } from './ratelimit';
 import { shapeConfigResult, visibilityFor } from './config-visibility';
+import { noteLocalEdit } from './lists-sync';
+import type { Kind } from './lists-plan';
 
 function safe<T>(fn: () => T, fallback: T): T {
 	try {
@@ -18,6 +20,14 @@ function safe<T>(fn: () => T, fallback: T): T {
 		return fallback;
 	}
 }
+
+/** Actions that edit a list the worker mirrors in server_bans / server_reserved. */
+const LIST_EDITS: Record<string, { kind: Kind; op: 'add' | 'remove' }> = {
+	ban: { kind: 'ban', op: 'add' },
+	unban: { kind: 'ban', op: 'remove' },
+	reservedAdd: { kind: 'reserve', op: 'add' },
+	reservedRemove: { kind: 'reserve', op: 'remove' }
+};
 
 function messageOf(result: unknown): string {
 	if (
@@ -92,6 +102,11 @@ export async function runAction(
 	// Pages read the live view; direct game reads are for tools and the odd refresh, not a poll loop.
 	assertRate(`rcon:${user.id}`, 120, 60_000);
 
+	// The game's answers as it sent them are what a connection test shows, and that needs Config
+	// & settings; a viewer gets the shaped status and the feature list.
+	const unshaped = access.caps.has('config.apply');
+	if (name === 'status' && !unshaped) delete params.raw;
+
 	const started = Date.now();
 	try {
 		const raw = await gateway().run(env, server, name, params);
@@ -99,9 +114,28 @@ export async function runAction(
 		// it comes back is decided here, by capability, after the game server answers -- never by the
 		// browser. See config-visibility.ts for why this cannot just be a capability on the action.
 		const result = name === 'config' ? shapeConfigResult(raw, visibilityFor(access.caps)) : raw;
+		if (name === 'capabilities' && !unshaped && result && typeof result === 'object')
+			delete (result as { raw?: unknown }).raw;
+		// Addresses are for the site owner alone: the listener's log keeps its events, not its peers.
+		if (name === 'serverLog' && user.role !== 'owner')
+			for (const e of (result as { entries?: { peer: string }[] })?.entries ?? []) e.peer = '';
 		const durationMs = Date.now() - started;
-		// The panel shows what the worker last saw; after a change, have it look again now.
-		if (def.mutating) gateway().observeSoon(server.id);
+		// The panel shows what the worker last saw; after a change, have it look again now. A list
+		// edit also rewrites the mirror here, so the change shows before the worker's re-read lands.
+		const listEdit = LIST_EDITS[name];
+		if (listEdit && /^\d{17}$/.test(target)) {
+			await noteLocalEdit(
+				env,
+				server.id,
+				listEdit.kind,
+				listEdit.op,
+				target,
+				typeof params?.reason === 'string' ? params.reason.slice(0, 200) : ''
+			).catch((err) => console.error('[warcon] list mirror', err));
+		}
+		if (def.mutating) gateway().observeSoon(server.id, { lists: !!listEdit });
+		// A new document may change MaxReservedSlots, which the worker otherwise re-reads hourly.
+		if (name === 'configApply') gateway().identityChanged(server.id);
 		if (def.mutating || auditReads) {
 			// An action that took another path than the caller asked for (reserved slots written to
 			// the config document) says so in the trail, with the revision it produced.

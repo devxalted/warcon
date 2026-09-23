@@ -10,7 +10,8 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Env } from './env';
 import { publicMessage } from './http';
 import type { OrgRow, ServerRow } from './access';
-import { ACTIONS } from './actions';
+import { ACTIONS, readConfig } from './actions';
+import { reservedSlotsHeld } from '../reserved-doc';
 import { GameError, WardogsClient } from './rcon';
 import { matches, samples, serverLive } from './db/schema';
 import type { DbOrTx } from './db';
@@ -20,17 +21,30 @@ import {
 	evaluateTriggers,
 	invalidateTriggers,
 	needsRiskInputs,
+	needsRiskPerformance,
 	riskInputs,
+	matchBoundary,
+	seedRule,
+	type MatchEnd,
+	type MatchLook,
 	type TickContext
 } from './triggers';
 import { applyTriggerUpdates, enqueueIntents, wakeDelivery } from './outbox';
-import { liveObserved, reconcileServer, writeSnapshot, type Observed } from './lists-sync';
+import {
+	kickBanned,
+	liveObserved,
+	reconcileServer,
+	writeSnapshot,
+	type Observed
+} from './lists-sync';
+import type { PanelBan } from './lists-plan';
 import {
 	closeAllSessions,
 	diffPresence,
 	firstVisits,
 	loadPresence,
 	newPresence,
+	followPlayer,
 	persistPresence,
 	type Presence,
 	type PresenceDiff
@@ -40,6 +54,7 @@ import { settings } from './settings';
 import { isWatched } from './interest';
 import { emit } from './events';
 import { liveView, writeLive } from './live';
+import { observations, observationSeconds } from './metrics';
 import { nextDue, withHold } from './poller-schedule';
 import { cashByFaction } from '$lib/cash';
 import type { Features, LiveView, Player, Status } from '$lib/types';
@@ -77,9 +92,11 @@ export interface ServerMemory {
 	players: Player[];
 	playersAt: number;
 	presence: Presence;
-	lastMatchSeconds: number | null;
-	lastScores: unknown;
+	/** the previous look at the match (map, scores, clock); null until one is remembered */
+	lastMatch: MatchLook | null;
 	reserved: Set<string>;
+	/** the bans the lists put on this server, from the last sync: these players are removed on sight */
+	bans: Map<string, PanelBan>;
 	listsAt: number;
 	syncAt: number;
 	liveKey: string;
@@ -88,6 +105,14 @@ export interface ServerMemory {
 	sampleWrittenAt: number;
 	/** what the build says about itself: refreshed hourly and after an outage */
 	identity: Identity;
+	/**
+	 * When the game process started, from uptimeSeconds on GET /v1/health, read with every status
+	 * observation; 0 until read. Stored as a start time so the uptime counts up without polling
+	 * and a backwards jump says "restarted" even when the outage was too short to be seen.
+	 */
+	startedAt: number;
+	/** the build answered "no such endpoint" to /v1/health; asked again when the identity is re-read */
+	healthUnserved: boolean;
 	/** observations completed */
 	count: number;
 }
@@ -96,6 +121,8 @@ export interface ServerMemory {
 export interface Identity {
 	build: string;
 	gameServerId: string;
+	/** MaxReservedSlots from the config document; null until read or when the document lacks it */
+	reservedSlots: number | null;
 	features: Features | null;
 	/** when it was last (re)read; 0 asks the next observation to read it */
 	checkedAt: number;
@@ -131,16 +158,25 @@ export function memoryFor(server: ServerRow, org: OrgRow): ServerMemory {
 			players: [],
 			playersAt: 0,
 			presence: newPresence(),
-			lastMatchSeconds: null,
-			lastScores: null,
+			lastMatch: null,
 			reserved: new Set(),
+			bans: new Map(),
 			listsAt: 0,
 			syncAt: 0,
 			liveKey: '',
 			liveWrittenAt: 0,
 			sampleKey: '',
 			sampleWrittenAt: 0,
-			identity: { build: '', gameServerId: '', features: null, checkedAt: 0, hydrated: false },
+			identity: {
+				build: '',
+				gameServerId: '',
+				reservedSlots: null,
+				features: null,
+				checkedAt: 0,
+				hydrated: false
+			},
+			startedAt: 0,
+			healthUnserved: false,
 			count: 0
 		};
 		registry.set(server.id, m);
@@ -168,13 +204,20 @@ async function hydrateIdentity(env: Env, m: ServerMemory): Promise<void> {
 	m.identity.hydrated = true;
 	try {
 		const [row] = await env.db
-			.select({ build: serverLive.build, gameServerId: serverLive.gameServerId })
+			.select({
+				build: serverLive.build,
+				gameServerId: serverLive.gameServerId,
+				reservedSlots: serverLive.reservedSlots,
+				startedAt: serverLive.startedAt
+			})
 			.from(serverLive)
 			.where(eq(serverLive.serverId, m.server.id))
 			.limit(1);
 		if (row) {
 			if (!m.identity.build) m.identity.build = row.build;
 			if (!m.identity.gameServerId) m.identity.gameServerId = row.gameServerId;
+			if (m.identity.reservedSlots === null) m.identity.reservedSlots = row.reservedSlots;
+			if (!m.startedAt && row.startedAt) m.startedAt = row.startedAt.getTime();
 		}
 	} catch (e) {
 		console.warn(`[warcon] identity of ${m.server.name} not read:`, publicMessage(e));
@@ -224,15 +267,46 @@ async function refreshIdentity(client: WardogsClient, m: ServerMemory, now: numb
 			holdFor(m, err);
 		}
 	}
+	// How many player slots the server holds back for reserved players lives in its config document
+	// (MaxReservedSlots), which every build serves; the status route only reports the public cap.
+	try {
+		next.reservedSlots = reservedSlotsHeld((await readConfig(client)).text);
+	} catch (err) {
+		retrySoon();
+		holdFor(m, err);
+	}
 	m.identity = next;
+	// A new build may serve what the old one did not.
+	m.healthUnserved = false;
+}
+
+/** uptimeSeconds is whole seconds and the read has latency: a start time this close is the same start. */
+const START_DRIFT_MS = 5_000;
+
+/**
+ * Reads the process uptime and keeps it as a start time. A failure keeps the previous answer
+ * (a transient error must not blank the uptime on the header); a build without the route is not
+ * asked again until its identity is re-read; a 429 becomes a hold like any other.
+ */
+async function refreshUptime(client: WardogsClient, m: ServerMemory, now: number): Promise<void> {
+	if (m.healthUnserved) return;
+	try {
+		const h = (await ACTIONS.health.run(client, {})) as { uptimeSeconds?: unknown };
+		const up = Number(h?.uptimeSeconds);
+		if (!Number.isFinite(up) || up < 0) return;
+		const startedAt = now - Math.floor(up) * 1000;
+		if (Math.abs(startedAt - m.startedAt) > START_DRIFT_MS) m.startedAt = startedAt;
+	} catch (err) {
+		if (err instanceof GameError && err.code === 'no_route') m.healthUnserved = true;
+		else holdFor(m, err);
+	}
 }
 
 /** Another process may have written since we last owned the worker: forget what we remember. */
 export function forgetRemembered(): void {
 	for (const m of registry.values()) {
 		m.presence = newPresence();
-		m.lastMatchSeconds = null;
-		m.lastScores = null;
+		m.lastMatch = null;
 		m.liveKey = '';
 		m.sampleKey = '';
 		m.listsAt = 0;
@@ -326,6 +400,8 @@ const liveKeyOf = (m: ServerMemory) =>
 		m.holdUntil,
 		m.identity.build,
 		m.identity.gameServerId,
+		m.identity.reservedSlots,
+		m.startedAt,
 		idsOf(m.players)
 	]);
 
@@ -357,9 +433,13 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 			players = ((await ACTIONS.players.run(client, {})) as { players: Player[] }).players;
 	} catch (err) {
 		await observationFailed(env, m, ts, started, err);
+		observations.inc({ outcome: 'failed' });
+		observationSeconds.observe((Date.now() - started) / 1000);
 		return;
 	}
 	const latencyMs = Date.now() - started;
+	observations.inc({ outcome: 'ok' });
+	observationSeconds.observe(latencyMs / 1000);
 	const wasOffline = m.failures >= OFFLINE_AFTER_FAILURES;
 	// Any failure may have been a restart onto a new build: re-read the identity on recovery.
 	const hadFailed = m.failures > 0;
@@ -379,8 +459,20 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 		m.playersAt = started;
 	}
 	m.tier = tierOf(m, started);
+	// The match boundary is read from memory before anything is written, so the rules and the
+	// match bookkeeping below see the same answer; memory then follows the observation.
+	const look: MatchLook | null = status
+		? {
+				map: status.map,
+				scores: status.scores.map((f) => ({ name: f.name, score: f.score })),
+				matchSeconds: status.matchSeconds ?? null
+			}
+		: null;
+	const matchEnd = look && !wasOffline ? matchBoundary(m.lastMatch, look) : null;
+	if (look) m.lastMatch = look;
 	if (hadFailed || started - m.identity.checkedAt >= IDENTITY_TTL_MS)
 		await refreshIdentity(client, m, started);
+	if (status) await refreshUptime(client, m, started);
 	if (!m.presence.loaded) await loadPresence(env.db, server.id, m.presence);
 
 	// Joins are trusted only when the previous look at the player list is recent enough that
@@ -393,8 +485,8 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 		!wasOffline &&
 		gapMs <= 2 * Math.max(m.playersIntervalMs, 1000) + 1000;
 	const diff: PresenceDiff = players
-		? diffPresence(m.presence, players)
-		: { joined: [], left: [], stayed: [], factioned: [] };
+		? diffPresence(m.presence, players, started)
+		: { joined: [], left: [], stayed: [], factioned: [], renamed: [] };
 	const joined = joinsTrusted ? diff.joined : [];
 	// Players pick a faction after joining; rules that wait for it see the change here. A joiner
 	// who arrives with one (a reconnect) counts as a first pick on the spot.
@@ -407,8 +499,28 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 	const rows = m.status ? await enabledTriggers(env, server.id) : [];
 	const risk =
 		joined.length && needsRiskInputs(rows)
-			? await riskInputs(env, server, joined)
-			: { signals: new Map(), profiles: new Map() };
+			? await riskInputs(env, server, joined, needsRiskPerformance(rows))
+			: { signals: new Map(), profiles: new Map(), performance: new Map() };
+
+	// Seed time: while a seeding rule is on and the server is at or under its threshold, everyone
+	// still on earns the time since the previous look at the list (on the same terms as a join is
+	// trusted: a recent look, so they were on throughout), held as pending. It banks the moment
+	// the server is filled (the rule's line, else the limit the server reports) with the player
+	// still on; leaving first forfeits it, so sitting on an empty server that never fills earns
+	// nothing. In between, pending waits. A server that reports no limit never fills on its own.
+	const seed = seedRule(rows);
+	if (players && seed) {
+		const fullAt = seed.fullAt ?? (m.status?.maxPlayers || Infinity);
+		if (players.length >= fullAt)
+			for (const { session } of diff.stayed) {
+				session.seedMs += session.pendingSeedMs;
+				session.pendingSeedMs = 0;
+			}
+		else if (players.length <= seed.lowAt && joinsTrusted)
+			for (const { session } of diff.stayed)
+				if (seed.untilFull) session.pendingSeedMs += gapMs;
+				else session.seedMs += gapMs;
+	}
 
 	const s = settings();
 	const heartbeatDue = started - m.presence.heartbeatAt >= s.sessionHeartbeatMs;
@@ -439,27 +551,31 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 						server,
 						status: m.status,
 						players: m.players,
+						playersObserved: players !== null,
+						playersIntervalMs: m.playersIntervalMs,
 						joined,
+						renamed: diff.renamed,
 						factioned,
 						firstVisit,
 						reserved: m.reserved,
+						reservedLoaded: m.listsAt > 0,
+						seedMs:
+							seed === null
+								? new Map()
+								: new Map([...m.presence.open.values()].map((s) => [s.steamId, s.seedMs])),
 						signals: risk.signals,
 						profiles: risk.profiles,
+						performance: risk.performance,
+						startedAt: m.startedAt,
+						matchEnd,
 						ts
 					},
 					rows
 				)
 			: { intents: [], updates: [] };
 	// Memory follows every player observation; the database only when something is due.
-	for (const { player: p, session: s } of diff.stayed) {
-		s.name = p.name;
-		s.faction = p.faction;
-		if (p.faction) s.lastFaction = p.faction;
-		s.kills = p.kills;
-		s.deaths = p.deaths;
-		s.cash = p.cash;
-		s.lastSeen = started;
-	}
+	const teams = m.status?.scores.map((f) => f.name);
+	for (const { player: p, session: s } of diff.stayed) followPlayer(s, p, started, teams);
 	const presenceDue =
 		diff.joined.length > 0 || diff.left.length > 0 || (heartbeatDue && diff.stayed.length > 0);
 	const needWrite =
@@ -469,7 +585,16 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 		if (needWrite)
 			await withOwnedTransaction(env, async (tx) => {
 				if (players && presenceDue)
-					await persistPresence(tx, server.id, m.presence, diff, ts, heartbeatDue, firstVisit);
+					await persistPresence(
+						tx,
+						server.id,
+						m.presence,
+						diff,
+						ts,
+						heartbeatDue,
+						firstVisit,
+						teams
+					);
 				if (ev.intents.length) intents = await enqueueIntents(tx, server.id, ev.intents);
 				if (ev.updates.length) await applyTriggerUpdates(tx, ev.updates);
 				if (liveDue) await writeLive(tx, m, ts);
@@ -487,18 +612,26 @@ export async function observeServer(env: Env, m: ServerMemory, kinds: ObserveKin
 		// Nothing was committed, but the presence map may have moved: reload it next time so the
 		// joins are seen (and their triggers evaluated) again.
 		m.presence = newPresence();
+		// A ping rule advances its cached streak before the transaction. Reload the persisted state
+		// after a failed write so a failed enqueue cannot suppress its eventual kick.
+		invalidateTriggers(server.id);
 		if (err instanceof LostOwnership) throw err;
 		console.warn(`[warcon] observation of ${server.name} not saved:`, publicMessage(err));
 	}
 	emit({ type: 'live', live: liveView(m) });
 	if (intents) wakeDelivery();
 
-	// Housekeeping, each part on its own, and only while this process still owns the worker.
-	if (status)
+	// Housekeeping, each part on its own, and only while this process still owns the worker. A
+	// player the lists want banned here, seen on the list: banned now, not at the sync's retry.
+	if (look)
 		await stage('match', m, () =>
-			withOwnedTransaction(env, (tx) => reconcileMatch(tx, m, ts, status!))
+			withOwnedTransaction(env, (tx) => reconcileMatch(tx, m, ts, look, matchEnd))
 		);
 	if (isOwner()) await stage('lists', m, () => keepLists(env, m, client, started, ts));
+	// After the lists, so a ban just placed removes the player at this look, not the next.
+	const seen = players?.map((p) => p.steamId) ?? [];
+	if (isOwner() && seen.length && m.bans.size)
+		await stage('bans', m, () => kickBanned(env, server, m.org, client, seen, m.bans));
 	if (diff.joined.length && steamEnabled(env))
 		void getProfiles(
 			env,
@@ -546,7 +679,7 @@ async function observationFailed(
 				// Close every open session once; a rollback below reloads the map so this retries.
 				if (!m.presence.loaded) await loadPresence(tx, m.server.id, m.presence);
 				if (m.presence.open.size) await closeAllSessions(tx, m.presence);
-				m.lastMatchSeconds = null;
+				m.lastMatch = null;
 			}
 			if (sampleDue)
 				await tx.insert(samples).values({
@@ -633,6 +766,7 @@ async function keepLists(
 			lane: 'held'
 		});
 		if (synced.observed) m.reserved = new Set(synced.observed.reserved);
+		if (synced.bans) m.bans = new Map(synced.bans.map((b) => [b.steamId, b]));
 	}
 }
 
@@ -640,45 +774,44 @@ async function reconcileMatch(
 	db: DbOrTx,
 	m: ServerMemory,
 	ts: Date,
-	status: Status
+	look: MatchLook,
+	ended: MatchEnd | null
 ): Promise<void> {
 	const serverId = m.server.id;
-	const scores = status.scores.map((f) => ({ name: f.name, score: f.score }));
 	const [current] = await db
 		.select({ id: matches.id, map: matches.map, peakPlayers: matches.peakPlayers })
 		.from(matches)
 		.where(and(eq(matches.serverId, serverId), isNull(matches.endedAt)))
 		.orderBy(desc(matches.id))
 		.limit(1);
-	const secs = status.matchSeconds ?? null;
-	// A new match: the map changed, or the clock went backwards (restart / rotation advance).
-	const restarted = secs !== null && m.lastMatchSeconds !== null && secs < m.lastMatchSeconds - 30;
-	const mapChanged = !!current && current.map !== status.map;
-	if (current && (restarted || mapChanged)) {
-		const last = (m.lastScores as { name: string; score: number }[] | null) ?? scores;
-		const winner = [...last].sort((a, b) => b.score - a.score)[0]?.name ?? null;
+	// A boundary seen in memory closes the open row. After a worker start there is no previous
+	// look, so a row left open on another map is closed with the scores seen now, as before.
+	const end =
+		ended ??
+		(current && current.map !== look.map
+			? matchBoundary({ map: current.map ?? '', scores: look.scores, matchSeconds: null }, look)
+			: null);
+	if (current && end) {
 		await db
 			.update(matches)
-			.set({ endedAt: ts, finalScores: last, winner })
+			.set({ endedAt: ts, finalScores: end.scores, winner: end.winner })
 			.where(eq(matches.id, current.id));
 	}
-	if (!current || restarted || mapChanged) {
+	if (!current || end) {
+		const secs = look.matchSeconds;
 		const startedAt = secs !== null ? new Date(ts.getTime() - secs * 1000) : ts;
 		await db.insert(matches).values({
 			serverId,
 			startedAt,
-			map: status.map,
-			experiences: status.experiences.join('+'),
-			lighting: status.lighting,
-			peakPlayers: status.playerCount
+			map: look.map,
+			experiences: m.status!.experiences.join('+'),
+			lighting: m.status!.lighting,
+			peakPlayers: m.status!.playerCount
 		});
-	} else if (status.playerCount > current.peakPlayers) {
+	} else if (m.status!.playerCount > current.peakPlayers) {
 		await db
 			.update(matches)
-			.set({ peakPlayers: status.playerCount })
+			.set({ peakPlayers: m.status!.playerCount })
 			.where(eq(matches.id, current.id));
 	}
-	// Only once every write above is in: a rollback must not advance what we remember.
-	m.lastMatchSeconds = secs;
-	m.lastScores = scores;
 }

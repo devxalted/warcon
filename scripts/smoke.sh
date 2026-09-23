@@ -20,9 +20,9 @@ check root-redirects-setup '/setup' "$(curl -s -o /dev/null -w '%{redirect_url}'
 check signin-redirects-setup '/setup' "$(curl -s -o /dev/null -w '%{redirect_url}' $B/sign-in)"
 check api-unauth 'Sign in required' "$(req $J2 GET /api/servers)"
 check csrf-blocked 'X-Requested-With' "$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' $B/api/servers)"
-check setup-weak-pw '400' "$(form $J1 /setup 'username=james&password=short')"
-check setup-ok "303 $B/" "$(form $J1 /setup 'username=james&password=correct-horse-battery&displayName=James')"
-check setup-twice '303' "$(form $J2 /setup 'username=x&password=correct-horse-battery')"
+check setup-weak-pw '400' "$(form $J1 '/setup?/password' 'username=james&password=short')"
+check setup-ok "303 $B/" "$(form $J1 '/setup?/password' 'username=james&password=correct-horse-battery&displayName=James')"
+check setup-twice '303' "$(form $J2 '/setup?/password' 'username=x&password=correct-horse-battery')"
 check me-owner 'role:"owner"' "$(curl -s -b $J1 $B/ | grep -o 'role:"owner"' | head -1)"
 
 echo "== sign-in"
@@ -117,7 +117,7 @@ check user-list-forbidden-anon 'Sign in required' "$(req $J3 GET /api/users)"
 check bob-login '303' "$(form $J3 '/sign-in?/password' 'username=bob&password=bobs-long-password')"
 check bob-no-servers '"servers":[]' "$(req $J3 GET /api/servers)"
 check bob-not-owner 'Owner access required' "$(req $J3 GET /api/users)"
-check bob-users-page-403 '403' "$(pagecode $J3 /users)"
+check bob-users-page-403 '403' "$(pagecode $J3 /admin/users)"
 check bob-server-404 'Server not found' "$(req $J3 GET /api/servers/$SID/rcon/status)"
 GB="{\"grants\":[{\"serverId\":\"$SID\",\"roleId\":\"$RID_VIEWER\"}]}"
 check grant-viewer '"roleName":"viewer"' "$(req $J1 PUT /api/users/$UID_BOB/grants "$GB")"
@@ -216,7 +216,7 @@ check list-badid '17-digit' "$(req $J1 POST /api/orgs/$ORG/lists/ban/entries '{"
 check list-expiry-past 'future' "$(req $J1 POST /api/orgs/$ORG/lists/ban/entries '{"steamId":"76561198100000502","expiresAt":"2020-01-01T00:00:00Z"}')"
 check list-entries "\"steamId\":\"$L1\"" "$(req $J1 GET /api/orgs/$ORG/lists/ban/entries)"
 check list-count '"entryCount":1' "$(req $J1 GET /api/orgs/$ORG/lists)"
-check reserve-add '"priority":5' "$(req $J1 POST /api/orgs/$ORG/lists/reserve/entries '{"steamId":"76561198100000601","priority":5}')"
+check reserve-add '"reason":"donor"' "$(req $J1 POST /api/orgs/$ORG/lists/reserve/entries '{"steamId":"76561198100000601","reason":"donor"}')"
 check list-remove '"ok":true' "$(req $J1 DELETE /api/orgs/$ORG/lists/ban/entries/$L1)"
 check list-remove-gone 'not on the' "$(req $J1 DELETE /api/orgs/$ORG/lists/ban/entries/$L1)"
 check list-readd "\"steamId\":\"$L1\"" "$(req $J1 POST /api/orgs/$ORG/lists/ban/entries "$LB")"
@@ -236,29 +236,30 @@ check lists-editor-add '"steamId":"76561198100000503"' "$(req $J5 POST /api/orgs
 check lists-editor-orgs-link "/orgs/$ORG/bans" "$(curl -s -b $J5 $B/orgs)"
 check page-editor-bans '200' "$(pagecode $J5 "/orgs/$ORG/bans")"
 check page-editor-overview '403' "$(pagecode $J5 "/orgs/$ORG")"
-# sync: adding an entry pushes it to the demo server straight away
-check sync-applied "$L1" "$(req $J1 GET /api/servers/$SID/rcon/bans)"
-check sync-state-managed "\"$L1\":{\"state\":\"applied\",\"managed\":true}" "$(req $J1 GET /api/servers/$SID/lists/state)"
+# bans are the panel's to enforce: an entry is in force at once and nothing is written to the game
+check ban-not-in-game '0' "$(req $J1 GET /api/servers/$SID/rcon/bans | grep -c $L1)"
+check sync-state-managed "\"$L1\":{\"state\":\"applied\",\"managed\":true" "$(req $J1 GET /api/servers/$SID/lists/state)"
 check sync-reserve-applied '76561198100000601' "$(req $J1 GET /api/servers/$SID/rcon/reserved)"
-check sync-local-ban '"76561198100000301":{"state":"local","managed":false}' "$(req $J1 GET /api/servers/$SID/lists/state)"
+check sync-local-ban '"76561198100000301":{"state":"local","managed":false' "$(req $J1 GET /api/servers/$SID/lists/state)"
 check sync-remove '"ok":true' "$(req $J1 DELETE /api/orgs/$ORG/lists/ban/entries/$L1)"
 check sync-removed '0' "$(req $J1 GET /api/servers/$SID/rcon/bans | grep -c $L1)"
 check sync-local-kept '76561198100000301' "$(req $J1 GET /api/servers/$SID/rcon/bans)"
 check sync-now '"sync"' "$(req $J1 POST /api/orgs/$ORG/lists/sync)"
 check sync-server-now '"ok":true' "$(req $J1 POST /api/servers/$SID/lists/sync)"
-check sync-view-servers '"reservedCap"' "$(req $J1 GET /api/orgs/$ORG/lists)"
-# cap: the demo server holds 2 seeded slots + 1 added above + the org's 601; capping it at 3 makes the next org slot overflow
+check sync-view-servers '"syncedAt"' "$(req $J1 GET /api/orgs/$ORG/lists)"
+# MaxReservedSlots holds player slots back; it never caps the list. With 1 held back the demo server
+# already lists 2 seeded + 999 + 601, and another org slot still lands.
 CFG=$(req $J1 GET /api/servers/$SID/rcon/config); REV=$(echo "$CFG" | sed -E 's/.*"revision":"([^"]+)".*/\1/')
-BODY="{\"text\":\"[/Script/WDGame.WDGameSession]\\r\\nServerName=Renamed\\r\\nMaxReservedSlots=3\\r\\n\",\"revision\":\"$REV\",\"force\":true}"
+BODY="{\"text\":\"[/Script/WDGame.WDGameSession]\\r\\nServerName=Renamed\\r\\nMaxReservedSlots=1\\r\\n\",\"revision\":\"$REV\",\"force\":true}"
 req $J1 POST /api/servers/$SID/rcon/configApply "$BODY" >/dev/null
-check reserve-full 'Reserved slots are full' "$(req $J1 POST /api/orgs/$ORG/lists/reserve/entries '{"steamId":"76561198100000602"}')"
-check reserve-full-state '"state":"failed"' "$(req $J1 GET /api/orgs/$ORG/lists/reserve/entries)"
+check reserve-uncapped '"ok":true' "$(req $J1 POST /api/orgs/$ORG/lists/reserve/entries '{"steamId":"76561198100000602"}')"
+check reserve-uncapped-applied '76561198100000602' "$(req $J1 GET /api/servers/$SID/rcon/reserved)"
 check audit-sync '"action":"lists.sync"' "$(req $J1 GET '/api/audit?action=lists.sync')"
 # import: the seeded local ban is a candidate; adopting it makes it managed; editors may look but not adopt
 check import-candidates '"steamId":"76561198100000301"' "$(req $J1 GET /api/orgs/$ORG/lists/import)"
 check import-editor-denied 'Only an owner' "$(req $J5 POST /api/orgs/$ORG/lists/import '{"entries":[{"kind":"ban","steamId":"76561198100000301"}]}')"
 check import-post '"imported":1' "$(req $J1 POST /api/orgs/$ORG/lists/import '{"entries":[{"kind":"ban","steamId":"76561198100000301"}]}')"
-check import-managed '"76561198100000301":{"state":"applied","managed":true}' "$(req $J1 GET /api/servers/$SID/lists/state)"
+check import-managed '"76561198100000301":{"state":"applied","managed":true' "$(req $J1 GET /api/servers/$SID/lists/state)"
 check import-reason '"reason":"Cheating - aimbot"' "$(req $J1 GET /api/orgs/$ORG/lists/ban/entries)"
 check import-gone '0' "$(req $J1 GET /api/orgs/$ORG/lists/import | grep -c 76561198100000301)"
 check dossier-orglists '"orgLists":{"ban":{' "$(req $J1 GET /api/servers/$SID/players/76561198100000301)"
@@ -266,23 +267,36 @@ check dossier-orglists '"orgLists":{"ban":{' "$(req $J1 GET /api/servers/$SID/pl
 EXP=$(date -u -v+12S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+12 seconds' +%Y-%m-%dT%H:%M:%SZ)
 EB="{\"steamId\":\"76561198100000701\",\"expiresAt\":\"$EXP\"}"
 check expiry-add '"expiresAt"' "$(req $J1 POST /api/orgs/$ORG/lists/ban/entries "$EB")"
-check expiry-applied '76561198100000701' "$(req $J1 GET /api/servers/$SID/rcon/bans)"
+check expiry-applied '"76561198100000701":{"state":"applied","managed":true' "$(req $J1 GET /api/servers/$SID/lists/state)"
+# a banned player who is on the server is removed by the worker, with an audit row
+ON=$(req $J1 GET /api/servers/$SID/rcon/players | grep -o '7656119810000010[0-9]' | head -1)
+NB="{\"steamId\":\"$ON\",\"reason\":\"smoke\"}"
+check enforce-add "\"steamId\":\"$ON\"" "$(req $J1 POST /api/orgs/$ORG/lists/ban/entries "$NB")"
+for i in $(seq 1 10); do R=$(req $J1 GET /api/servers/$SID/rcon/players); [[ "$R" != *$ON* ]] && break; sleep 2; done
+check enforce-kicked '0' "$(echo "$R" | grep -c "$ON")"
+check enforce-audit '"action":"ban.enforce"' "$(req $J1 GET '/api/audit?action=ban.enforce')"
+check enforce-no-game-ban '0' "$(req $J1 GET /api/servers/$SID/rcon/bans | grep -c "$ON")"
 check steam-badid '400' "$(form $J1 '/account?/steam' 'steamId=abc')"
 check steam-set '200' "$(form $J1 '/account?/steam' 'steamId=76561198100000801')"
 check steam-dup-carol '409' "$(form $J5 '/account?/steam' 'steamId=76561198100000801')"
 check steam-shown '76561198100000801' "$(curl -s -b $J1 $B/account)"
-# raise the cap again so the member slot fits (2 seeded + 999 + 601 + 602 now + james = 6)
-CFG=$(req $J1 GET /api/servers/$SID/rcon/config); REV=$(echo "$CFG" | sed -E 's/.*"revision":"([^"]+)".*/\1/')
-BODY="{\"text\":\"[/Script/WDGame.WDGameSession]\\r\\nServerName=Renamed\\r\\nMaxReservedSlots=20\\r\\n\",\"revision\":\"$REV\",\"force\":true}"
-req $J1 POST /api/servers/$SID/rcon/configApply "$BODY" >/dev/null
 check members-reserved '"sync"' "$(req $J1 PATCH /api/orgs/$ORG '{"membersReserved":true}')"
 check member-slot '76561198100000801' "$(req $J1 GET /api/servers/$SID/rcon/reserved)"
 check member-entry '"member":true' "$(req $J1 GET /api/orgs/$ORG/lists/reserve/entries)"
 check member-off '"sync"' "$(req $J1 PATCH /api/orgs/$ORG '{"membersReserved":false}')"
 check member-slot-gone '0' "$(req $J1 GET /api/servers/$SID/rcon/reserved | grep -c 76561198100000801)"
-for i in $(seq 1 12); do R=$(req $J1 GET /api/servers/$SID/rcon/bans); [[ "$R" != *76561198100000701* ]] && break; sleep 3; done
+# Wait for the sweep, not for the state view. `lists/state` works out expiry as it renders, so the
+# entry leaves it the moment the clock passes -- while `removal` and the audit row are written by
+# expireEntries on the poller's tick, which has not necessarily run yet. Polling the state made
+# this loop exit immediately and the two checks below race the poller.
+for i in $(seq 1 20); do
+	ROWS=$(req $J1 GET "/api/orgs/$ORG/lists/ban/entries?includeRemoved=1")
+	[[ "$ROWS" == *'"removal":"expired"'* ]] && break
+	sleep 3
+done
+R=$(req $J1 GET /api/servers/$SID/lists/state)
 check expiry-lifted '0' "$(echo "$R" | grep -c 76561198100000701)"
-check expiry-row '"removal":"expired"' "$(req $J1 GET "/api/orgs/$ORG/lists/ban/entries?includeRemoved=1")"
+check expiry-row '"removal":"expired"' "$ROWS"
 check audit-expire '"action":"list.expire"' "$(req $J1 GET '/api/audit?action=list.expire')"
 
 echo "== analytics"
@@ -298,7 +312,7 @@ check trigger-firecount '"fireCount":' "$(req $J1 GET /api/servers/$SID/triggers
 req $J1 DELETE /api/servers/$SID/triggers/$TID2 >/dev/null; req $J1 DELETE /api/servers/$SID/triggers/$TID3 >/dev/null
 
 echo "== pages (owner)"
-for p in / /audit /users /servers /orgs "/orgs/$ORG" "/orgs/$ORG/bans" "/orgs/$ORG/reserved" /account "/server/$SID" "/server/$SID/players" "/server/$SID/players/$P1" "/server/$SID/bans" "/server/$SID/automation" "/server/$SID/rotation" "/server/$SID/slots" "/server/$SID/config" "/server/$SID/log" "/audit?outcome=denied&q=kick"; do check "page $p" '200' "$(pagecode $J1 "$p")"; done
+for p in / /audit /admin/users /servers /orgs "/orgs/$ORG" "/orgs/$ORG/bans" "/orgs/$ORG/reserved" /account "/server/$SID" "/server/$SID/players" "/server/$SID/players/$P1" "/server/$SID/bans" "/server/$SID/automation" "/server/$SID/rotation" "/server/$SID/slots" "/server/$SID/config" "/server/$SID/log" "/audit?outcome=denied&q=kick"; do check "page $p" '200' "$(pagecode $J1 "$p")"; done
 check page-unknown-server '404' "$(pagecode $J1 /server/nope)"
 check server-delete '"ok":true' "$(req $J1 DELETE /api/servers/$SID2)"
 check page-sessions 'this session' "$(curl -s -b $J1 $B/account)"

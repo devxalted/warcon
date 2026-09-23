@@ -37,6 +37,9 @@ import {
 import { phaseOffset, pickDue, withHold } from './poller-schedule';
 import { applyRetentionPolicy, rollupSamples } from './rollups';
 import { liveView } from './live';
+import { feedDemoKills } from './feed-events';
+import { publicMessage } from './http';
+import * as metrics from './metrics';
 import type { LiveView } from '$lib/types';
 
 const BEAT_MS = 250;
@@ -77,6 +80,24 @@ interface Scheduler {
 
 let scheduler: Scheduler | null = null;
 let envRef: Env | null = null;
+let unregisterMetrics: (() => void) | null = null;
+
+/** Fills the worker gauges from the scheduler once per scrape. */
+async function collectWorkerMetrics(): Promise<void> {
+	const st = await pollerStats();
+	for (const tier of ['watched', 'hot', 'idle', 'offline'] as const)
+		metrics.serversByTier.set({ tier }, st.tiers[tier]);
+	metrics.playersOnline.set(st.players);
+	metrics.observationsInFlight.set(st.active);
+	metrics.observationConcurrency.set(st.concurrency);
+	metrics.serversBehind.set(st.behind);
+	metrics.observationsStuck.set(st.stuck);
+	metrics.lanesBusy.set(st.lanes.busy);
+	metrics.lanesQueued.set(st.lanes.queued);
+	metrics.leaseHeld.set(st.owner ? 1 : 0);
+	metrics.outboxPending.set(st.delivery.pending);
+	metrics.outboxOldestSeconds.set((st.delivery.oldestMs ?? 0) / 1000);
+}
 
 export function startPoller(env: Env, label = 'worker'): void {
 	envRef = env;
@@ -108,6 +129,8 @@ export function startPoller(env: Env, label = 'worker'): void {
 	globalThis.__warconRenew = scheduler.renewTimer;
 	startDelivery(env);
 	startStatusMirror(env);
+	if (unregisterMetrics) unregisterMetrics();
+	unregisterMetrics = metrics.registerCollector(collectWorkerMetrics);
 	globalThis.__warconPoller = setInterval(() => void beat(env), BEAT_MS);
 	console.log('[warcon] worker scheduler started');
 }
@@ -120,14 +143,21 @@ export async function stopPoller(): Promise<void> {
 	globalThis.__warconRenew = undefined;
 	stopDelivery();
 	stopStatusMirror();
+	if (unregisterMetrics) unregisterMetrics();
+	unregisterMetrics = null;
 	scheduler = null;
 	if (envRef) await releaseOwnership(envRef);
 }
 
-/** Look at this server as soon as its lane is free (a command was just sent, a list was edited). */
-export function observeSoon(serverId: string): void {
+/**
+ * Look at this server as soon as its lane is free (a command was just sent, a list was edited).
+ * `lists` makes that pass re-read the ban list and reserved slots as well, so the mirror and the
+ * worker's own copy catch up now rather than at the next snapshot.
+ */
+export function observeSoon(serverId: string, opts?: { lists?: boolean }): void {
 	const m = memoryOf(serverId);
 	if (!m) return;
+	if (opts?.lists) m.listsAt = 0;
 	if (m.inFlight !== null) m.again = true;
 	else {
 		// ...but never inside a rate-limit hold the listener asked for.
@@ -135,6 +165,18 @@ export function observeSoon(serverId: string): void {
 		m.playersDueAt = withHold(now, m.holdUntil, now);
 		m.statusDueAt = withHold(now, m.holdUntil, now);
 	}
+}
+
+/**
+ * The server's lists were just edited: its next look, which comes at once, takes the lists again,
+ * so the worker holds the new bans and removes a banned player who is on now rather than at the
+ * next scheduled sync.
+ */
+export function resyncSoon(serverId: string): void {
+	const m = memoryOf(serverId);
+	if (!m) return;
+	m.syncAt = 0;
+	observeSoon(serverId);
 }
 
 /**
@@ -283,7 +325,13 @@ function launchDue(env: Env, s: Scheduler, now: number): void {
 		s.active++;
 		s.launched++;
 		if (offline) s.activeOffline++;
-		withServer(m.server.id, PRIORITY.observe, () => observeServer(env, m, kinds))
+		withServer(m.server.id, PRIORITY.observe, () =>
+			observeServer(env, m, kinds).then(() =>
+				feedDemoKills(env, m.server).catch((err) =>
+					console.warn('[warcon] demo kill feed:', publicMessage(err))
+				)
+			)
+		)
 			.catch((err) => {
 				if (err instanceof LostOwnership) return;
 				console.error(`[warcon] observe ${m.server.name}`, err);
@@ -343,6 +391,8 @@ export interface PollerStats {
 	enabled: boolean;
 	owner: boolean;
 	servers: number;
+	/** players on every reachable server, from its last observation */
+	players: number;
 	tiers: Record<'watched' | 'hot' | 'idle' | 'offline', number>;
 	cadence: Record<'watched' | 'hot' | 'idle', { players: number; status: number }>;
 	concurrency: number;
@@ -356,6 +406,8 @@ export interface PollerStats {
 	delivery: ReturnType<typeof deliveryStats> & { pending: number; oldestMs: number | null };
 	settingsVersion: number;
 	ownership: ReturnType<typeof ownershipStats>;
+	/** this process's cumulative counters and memory, for the Admin overview */
+	process: metrics.ProcessSnapshot;
 }
 
 export async function pollerStats(): Promise<PollerStats> {
@@ -364,9 +416,11 @@ export async function pollerStats(): Promise<PollerStats> {
 	const tiers = { watched: 0, hot: 0, idle: 0, offline: 0 };
 	let behind = 0;
 	let stuck = 0;
+	let players = 0;
 	if (s)
 		for (const m of s.roster) {
 			tiers[m.tier]++;
+			if (m.ok) players += m.status?.playerCount ?? m.players.length;
 			const due = Math.min(m.playersDueAt, m.statusDueAt);
 			const c = cadenceOf(m.tier, m.failures);
 			if (m.inFlight === null && due > 0 && now - due > Math.min(c.players, c.status)) behind++;
@@ -381,6 +435,7 @@ export async function pollerStats(): Promise<PollerStats> {
 		enabled: !!s,
 		owner: isOwner(),
 		servers: s?.roster.length ?? 0,
+		players,
 		tiers,
 		cadence: {
 			watched: { players: set.watchedPlayersMs, status: set.watchedStatusMs },
@@ -396,7 +451,8 @@ export async function pollerStats(): Promise<PollerStats> {
 		lanes: dispatcherStats(),
 		delivery: { ...deliveryStats(), ...depth },
 		settingsVersion: settingsVersion(),
-		ownership: ownershipStats()
+		ownership: ownershipStats(),
+		process: await metrics.snapshot()
 	};
 }
 

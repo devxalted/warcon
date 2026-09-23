@@ -59,6 +59,14 @@ export interface ServerInfo {
 	manager: boolean;
 	sortOrder: number;
 	demo: boolean;
+	/** the org owner's switches for the public pages; see $lib/features for what is actually on */
+	publicStatus: boolean;
+	publicLeaderboards: boolean;
+	/** the public status page also carries the last kills */
+	publicKills: boolean;
+	/** what the site owner allows this server's organisation */
+	allowPublicStatus: boolean;
+	allowPublicLeaderboards: boolean;
 }
 
 export interface CatalogItem {
@@ -129,6 +137,13 @@ export interface LiveView {
 	build: string;
 	/** the join code from GET /v1/server-id (CL-501228+); '' when unknown or unserved */
 	gameServerId: string;
+	/** when the game process started (from GET /v1/health); null until read, or unserved by the build */
+	startedAt: string | null;
+	/**
+	 * MaxReservedSlots from the config document: player slots held back from public joins for
+	 * reserved players, on top of `status.maxPlayers`; null until the worker has read it
+	 */
+	reservedSlots: number | null;
 	/** set while the listener has asked the panel to slow down (429 with Retry-After) */
 	throttledUntil: string | null;
 	status: Status | null;
@@ -136,6 +151,25 @@ export interface LiveView {
 	statusAt: string | null;
 	playersAt: string | null;
 	observedAt: string | null;
+}
+/** One kill as the game's feed reported it and Warcon stored it (kills table). */
+export interface KillView {
+	eventId: string;
+	/** when Warcon received it */
+	ts: string;
+	map: string;
+	/** seconds on the match clock */
+	eventTime: number;
+	/** null: the environment */
+	killer: { steamId: string; name: string; faction: string | null } | null;
+	victim: { steamId: string; name: string; faction: string | null };
+	/** the raw weapon or vehicle tag; $lib/causes labels it */
+	cause: string | null;
+	distanceM: number | null;
+	headshot: boolean;
+	suicide: boolean;
+	teamKill: boolean;
+	tags: string[];
 }
 /** One trigger action and what became of it. */
 export interface OutboxView {
@@ -233,6 +267,10 @@ export interface UserView {
 	role: 'owner' | 'member';
 	disabled: boolean;
 	mustChangePassword: boolean;
+	/** meets the sign-in rules (two ways in, second factor on any password, ...) */
+	authComplete: boolean;
+	/** sign-in methods on file, e.g. ["password", "authenticator", "passkey ×2", "discord"] */
+	signIn: string[];
 	image: string | null;
 	createdAt: string | null;
 	lastLoginAt: string | null;
@@ -251,6 +289,11 @@ export interface OrgView {
 	/** the site owner's per-org override, if any */
 	customServerLimit: number | null;
 	suspended: { at: string; reason: string } | null;
+	/** site-owner allowances for the public surfaces ($lib/features) */
+	allowPublicStatus: boolean;
+	allowPublicLeaderboards: boolean;
+	/** the org's Discord invite link for its public pages; '' = none */
+	discordInviteUrl: string;
 	createdBy: { username: string; name: string } | null;
 	createdAt: string | null;
 }
@@ -302,6 +345,10 @@ export interface SteamView {
 	daysSinceLastBan: number | null;
 	communityBanned: boolean;
 	economyBan: string;
+	friendsState: string;
+	friendsTotal: number;
+	friendsChecked: number;
+	bannedFriends: number;
 	fetchedAt: string;
 	error: string;
 }
@@ -342,11 +389,32 @@ export interface DossierSession {
 	lastSeen: string;
 	leftAt: string | null;
 	minutes: number;
+	/** minutes of this session with the player count at or under the server's seeding threshold */
+	seedMinutes: number;
 	kills: number;
 	deaths: number;
 	cash: number;
 }
 
+/** A player's kill-feed record across some servers: what the dossier and a public career show. */
+export interface CombatSummary {
+	kills: number;
+	deaths: number;
+	headshots: number;
+	teamKills: number;
+	/** times this player was team-killed */
+	teamKilled: number;
+	suicides: number;
+	avgDistanceM: number | null;
+	longestM: number | null;
+	causes: { cause: string; kills: number }[];
+	victims: { steamId: string; name: string; kills: number }[];
+	nemeses: { steamId: string; name: string; deaths: number }[];
+}
+export interface PlayerCombat extends CombatSummary {
+	/** the last kills and deaths involving the player, newest first */
+	recent: (KillView & { serverId: string; serverName: string })[];
+}
 export interface DossierView {
 	steamId: string;
 	name: string;
@@ -369,6 +437,8 @@ export interface DossierView {
 		firstSeen: string | null;
 		lastSeen: string | null;
 	};
+	/** from the kill feed, across the org's servers the viewer can see; null when none has one */
+	combat: PlayerCombat | null;
 	perServer: {
 		serverId: string;
 		serverName: string;
@@ -393,7 +463,18 @@ export interface DossierView {
 
 // ---- automation ---------------------------------------------------------------------------------
 
-export type TriggerKind = 'welcome' | 'faction_change' | 'broadcast' | 'empty_reset' | 'risk_kick';
+export type TriggerKind =
+	| 'welcome'
+	| 'faction_change'
+	| 'broadcast'
+	| 'empty_reset'
+	| 'risk_kick'
+	| 'ping_kick'
+	| 'restart_notice'
+	| 'team_kill'
+	| 'seed_reward'
+	| 'match_broadcast'
+	| 'name_filter';
 
 export interface TriggerView {
 	id: string;
@@ -428,6 +509,12 @@ export interface WebhookView {
 	/** keeps a live status card per covered server in the channel, edited in place */
 	statusEnabled: boolean;
 	statusStyle: StatusStyle;
+	/** seconds between edits of one card, 30-300 */
+	statusIntervalS: number;
+	/** which links the card carries (each public one only while that page is on for the server) */
+	linkStatus: boolean;
+	linkLeaderboard: boolean;
+	linkPanel: boolean;
 	statusSentAt: string | null;
 	lastSentAt: string | null;
 	lastStatus: number | null;
@@ -469,7 +556,6 @@ export interface ListEntryView {
 	expiresAt: string | null;
 	/** true once expiresAt has passed and the poller has not yet lifted it */
 	expired: boolean;
-	priority: number;
 	addedByName: string;
 	addedAt: string;
 	removedAt: string | null;
@@ -500,14 +586,13 @@ export interface ListSyncSummary {
 export interface OrgListsView {
 	role: 'owner' | 'editor';
 	membersReserved: boolean;
+	/** what a banned player is shown, see $lib/ban-message */
+	banMessage: string;
 	servers: {
 		id: string;
 		name: string;
 		/** last successful sync run; null = never */
 		syncedAt: string | null;
-		/** MaxReservedSlots as last read from the server; null = unknown */
-		reservedCap: number | null;
-		reservedUsed: number;
 		/** why the last run could not reach or finish on the server */
 		lastError: string;
 	}[];
@@ -521,18 +606,35 @@ export interface ImportCandidate {
 	servers: { serverId: string; serverName: string; reason: string; bannedBy: string }[];
 }
 
+/** One ban as the server's Bans page shows it. */
+export interface BanState {
+	state: ListEntryState;
+	managed: boolean;
+	/** the list a managed ban comes from: the organisation's, or this server's own */
+	scope: 'org' | 'server';
+	/** the reason on the list entry */
+	reason: string;
+	/** who added the entry; blank unless the reader manages bans here or edits the org's lists */
+	addedByName: string;
+	addedAt: string | null;
+	/** when the panel lifts the ban; null for a permanent one (or one not managed) */
+	expiresAt: string | null;
+}
+
 /** One reserved slot as the server's Reserved slots page shows it. */
 export interface ReservedSlotState {
 	state: ListEntryState;
 	managed: boolean;
 	/** last name seen on the org's servers, else the Steam persona, else null */
 	name: string | null;
-	/** the note on the org list entry, if any */
+	/** the note on the list entry, if any */
 	note: string;
 	/** a slot the org hands its members, not an entry someone added */
 	member: boolean;
-	/** org list priority; null for slots added on the server itself */
-	priority: number | null;
+	/** the list a managed slot comes from: the organisation's, or this server's own */
+	scope: 'org' | 'server';
+	/** when the panel lifts the slot; null for a permanent one (or one not managed) */
+	expiresAt: string | null;
 }
 
 /** Per-server view of which bans and reserved slots the org lists manage; for the players page. */
@@ -541,12 +643,12 @@ export interface ServerListsState {
 	/** owners may import (adopt) local entries into the org list */
 	orgOwner: boolean;
 	orgId: string;
-	bans: Record<string, { state: ListEntryState; managed: boolean }>;
+	/** the org's ban message, for those who can ban here; null for everyone else */
+	banMessage: string | null;
+	bans: Record<string, BanState>;
 	reserved: Record<string, ReservedSlotState>;
 	sync: {
 		syncedAt: string | null;
-		reservedCap: number | null;
-		reservedUsed: number;
 		lastError: string;
 	} | null;
 }

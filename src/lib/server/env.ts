@@ -9,7 +9,7 @@ import {
 	type Db,
 	type SqlClient
 } from './db';
-import { authSecretProblem } from './crypto';
+import { authSecretProblem, relaySecretProblem } from './crypto';
 
 export interface Env {
 	db: Db;
@@ -53,6 +53,8 @@ export interface Env {
 	POLL_SECONDS?: string;
 	/** Seed for the observation concurrency setting on a fresh install. */
 	POLL_CONCURRENCY?: string;
+	/** Bearer for GET /metrics (Prometheus) on the web and worker processes; the endpoint is off when unset. */
+	METRICS_TOKEN?: string;
 }
 
 export type Role = 'all' | 'web' | 'worker';
@@ -152,10 +154,8 @@ export async function initEnv(opts: { role?: Role } = {}): Promise<Env> {
 	const secretProblem = authSecretProblem(processEnv.BETTER_AUTH_SECRET);
 	if (secretProblem) throw new Error(secretProblem);
 	if (role !== 'all') {
-		if (!processEnv.RELAY_SECRET || processEnv.RELAY_SECRET.length < 16)
-			throw new Error(
-				'RELAY_SECRET (16+ characters, shared by web and worker) is required for the web and worker roles.'
-			);
+		const relayProblem = relaySecretProblem(processEnv.RELAY_SECRET);
+		if (relayProblem) throw new Error(relayProblem);
 		if (role === 'web' && !processEnv.RELAY_URL)
 			throw new Error('RELAY_URL (e.g. http://worker:7700) is required for the web role.');
 	}
@@ -191,6 +191,7 @@ export async function initEnv(opts: { role?: Role } = {}): Promise<Env> {
 		ALLOW_DEMO_SERVER: processEnv.ALLOW_DEMO_SERVER ?? 'true',
 		ALLOW_ORG_SIGNUP: processEnv.ALLOW_ORG_SIGNUP,
 		MAX_ORGS_PER_USER: processEnv.MAX_ORGS_PER_USER,
+		METRICS_TOKEN: processEnv.METRICS_TOKEN,
 		MAX_SERVERS_PER_ORG: processEnv.MAX_SERVERS_PER_ORG,
 		TURNSTILE_SITE_KEY: processEnv.TURNSTILE_SITE_KEY,
 		TURNSTILE_SECRET_KEY: processEnv.TURNSTILE_SECRET_KEY,

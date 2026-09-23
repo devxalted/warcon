@@ -2,11 +2,12 @@ import { fail, redirect } from '@sveltejs/kit';
 import { isAPIError } from 'better-auth/api';
 import type { Actions, PageServerLoad } from './$types';
 import { discordEnabled, getEnv } from '$lib/server/env';
-import { clientIp, str } from '$lib/server/http';
+import { addressKey, str } from '$lib/server/http';
 import { writeAudit } from '$lib/server/audit';
 import { clearLoginFailures, loginLockSeconds, noteLoginFailure } from '$lib/server/access';
-import { userCount } from '$lib/server/users';
+import { NOT_SET_UP, userCount } from '$lib/server/users';
 import { orgSignupEnabled } from '$lib/server/signup';
+import { beginSteam } from '$lib/server/steam-auth';
 
 /**
  * Where to go after signing in: a same-site path from ?next (an invite link), else the dashboard.
@@ -35,7 +36,10 @@ export const actions: Actions = {
 		if (!username || !password)
 			return fail(400, { error: 'Username and password are required.', username });
 
-		const keys = [`u:${username.toLowerCase()}`, `ip:${clientIp(request) || 'unknown'}`];
+		const keys = [
+			`u:${username.toLowerCase()}`,
+			`ip:${addressKey(request, env.BETTER_AUTH_SECRET ?? '')}`
+		];
 		const lock = await loginLockSeconds(env, keys);
 		if (lock > 0) {
 			await writeAudit(env, request, {
@@ -51,9 +55,16 @@ export const actions: Actions = {
 			});
 		}
 
+		let secondFactor = false;
 		try {
-			// The session-create hook in auth.ts writes the "login ok" audit row; cookies are set by the SvelteKit plugin.
-			await auth.api.signInUsername({ body: { username, password }, headers: request.headers });
+			// The session-create hook in auth.ts writes the "login ok" audit row; cookies are set by the
+			// SvelteKit plugin. With an authenticator enrolled, Better Auth withholds the session and sets
+			// a short-lived challenge cookie instead; /sign-in/verify finishes the job.
+			const res = await auth.api.signInUsername({
+				body: { username, password },
+				headers: request.headers
+			});
+			secondFactor = !!(res as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect;
 		} catch (err) {
 			if (!isAPIError(err)) throw err;
 			const code = (err as { body?: { code?: string } }).body?.code || '';
@@ -78,7 +89,23 @@ export const actions: Actions = {
 			return fail(401, { error: 'Bad username or password.', username });
 		}
 		await clearLoginFailures(env, keys);
-		redirect(303, nextPath(url));
+		const next = nextPath(url);
+		if (secondFactor)
+			redirect(303, `/sign-in/verify${next === '/' ? '' : `?next=${encodeURIComponent(next)}`}`);
+		redirect(303, next);
+	},
+
+	/** Steam OpenID: linked accounts sign in; new Steam users get an account only when sign-up is open. */
+	steam: async (event) => {
+		const env = getEnv();
+		if ((await userCount(env)) === 0) return fail(409, { error: NOT_SET_UP });
+		const next = nextPath(event.url);
+		beginSteam(event, env, {
+			mode: 'signin',
+			signup: orgSignupEnabled(env),
+			next: next === '/' && orgSignupEnabled(env) ? '/sign-up' : next,
+			back: `/sign-in${next === '/' ? '' : `?next=${encodeURIComponent(next)}`}`
+		});
 	},
 
 	/**
@@ -89,6 +116,7 @@ export const actions: Actions = {
 	discord: async ({ request, locals, url }) => {
 		const env = getEnv();
 		if (!discordEnabled(env)) return fail(404, { error: 'Discord sign-in is not configured.' });
+		if ((await userCount(env)) === 0) return fail(409, { error: NOT_SET_UP });
 		const next = nextPath(url);
 		const open = orgSignupEnabled(env);
 		const res = await locals.auth!.api.signInSocial({

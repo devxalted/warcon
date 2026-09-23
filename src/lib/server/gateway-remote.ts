@@ -8,7 +8,7 @@ import { GameError } from './rcon';
 import { emit, subscribe, type WarconEvent } from './events';
 import type { Gateway } from './gateway';
 import type { Priority } from './dispatcher';
-import type { LiveView, ListSyncSummary } from '$lib/types';
+import type { KillView, LiveView, ListSyncSummary } from '$lib/types';
 import type { SyncResult } from './lists-sync';
 import type { PollerStats } from './poller';
 import { RELAY_PREFIX, type RelayError } from './relay';
@@ -25,7 +25,7 @@ function rethrow(e: RelayError): never {
 	throw new ApiError(502, `Worker: ${e.message}`, 'worker_error');
 }
 
-async function call<T>(
+export async function call<T>(
 	env: Env,
 	path: string,
 	body?: unknown,
@@ -45,11 +45,9 @@ async function call<T>(
 			signal: AbortSignal.timeout(timeoutMs)
 		});
 	} catch (err) {
-		throw new ApiError(
-			503,
-			`The worker is not reachable (${err instanceof Error ? err.message : String(err)}).`,
-			'worker_unavailable'
-		);
+		// The runtime's text can quote the relay's URL, which is for the log, not for whoever clicked.
+		console.error('[warcon] relay', err instanceof Error ? err.message : err);
+		throw new ApiError(503, 'The worker is not reachable.', 'worker_unavailable');
 	}
 	const data = (await res.json().catch(() => null)) as {
 		ok?: boolean;
@@ -143,8 +141,8 @@ export function connectRemoteGateway(env: Env): Gateway {
 		interest(ids) {
 			void call(env, '/interest', { ids }).catch(() => {});
 		},
-		observeSoon(serverId) {
-			void call(env, '/observe-soon', { serverId }).catch(() => {});
+		observeSoon(serverId, opts) {
+			void call(env, '/observe-soon', { serverId, lists: !!opts?.lists }).catch(() => {});
 		},
 		observeNow(env, serverId) {
 			return call<LiveView | null>(env, '/observe-now', { serverId });
@@ -166,6 +164,9 @@ export function connectRemoteGateway(env: Env): Gateway {
 		},
 		statusChanged() {
 			void call(env, '/status-changed', {}).catch(() => {});
+		},
+		killsIngested(env, serverId, kills: KillView[]) {
+			void call(env, '/kills', { serverId, kills }).catch(() => {});
 		},
 		subscribe,
 		health(env) {

@@ -1,15 +1,17 @@
-// The org-list sync: pushes each org's ban and reserved-slot lists to its game servers. The
-// worker runs it on a schedule inside its observations (planning against the snapshot it keeps in
-// server_bans and server_reserved, and re-reading the server before it changes anything); the API
-// runs it right after an admin edits a list, so the toast can say where the change landed.
+// The list sync: pushes each org's ban and reserved-slot lists, and each server's own reserved
+// slots, to its game servers. The worker runs it on a schedule inside its observations (planning
+// against the snapshot it keeps in server_bans and server_reserved, and re-reading the server
+// before it changes anything); the API runs it right after an admin edits a list, so the toast
+// can say where the change landed.
 //
 // Rules of the road: the panel adds what the lists want and removes only what it added itself
 // (server_list_state). Every game call is idempotent in the panel's reading of it ("already
 // banned" is a success, "not banned" on delete is a success), so two replicas working the same
 // server at once do no harm; the in-process lock below only keeps the poller and an API call in
 // one process from interleaving.
-import { and, eq, inArray, isNotNull, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { Env } from './env';
+import { banUid, renderBanMessage } from '$lib/ban-message';
 import { publicMessage } from './http';
 import { writeAudit } from './audit';
 import { ACTIONS } from './actions';
@@ -32,20 +34,21 @@ import {
 } from './db/schema';
 import {
 	activeEntries,
+	desiredOf,
 	isAlreadyApplied,
 	isGone,
 	isUnreachable,
-	parseMaxReservedSlots,
 	planHasWork,
 	planSync,
-	RESERVED_FULL,
 	type Kind,
 	type PlanInput,
+	type PanelBan,
 	type SyncPlan
 } from './lists-plan';
+import type { DbOrTx } from './db';
 import type { Ban, Features, ListSyncServer, ListSyncSummary } from '$lib/types';
 
-/** A failed add or remove is not retried for this long (cap overflows are recomputed every run). */
+/** A failed add or remove is not retried for this long. */
 const RETRY_AFTER_MS = 5 * 60_000;
 /** How long an API-triggered fan-out waits for each server before reporting it as still syncing. */
 const FANOUT_WAIT_MS = 15_000;
@@ -60,6 +63,8 @@ export interface SyncResult extends ListSyncServer {
 	skipped?: 'busy' | 'suspended';
 	/** the server's lists after the run; the poller keeps its in-memory copy from this */
 	observed?: { bans: string[]; reserved: string[] };
+	/** the bans the lists put on this server; the worker removes these players on sight */
+	bans?: PanelBan[];
 }
 
 // ---- per-server lock ---------------------------------------------------------------------------
@@ -100,57 +105,41 @@ export async function withServerLock<T>(
 export async function desiredFor(
 	env: Env,
 	server: Pick<ServerRow, 'id' | 'orgId'>,
-	org: Pick<OrgRow, 'membersReserved'>,
+	org: Pick<OrgRow, 'membersReserved' | 'banMessage'>,
 	now = new Date()
 ): Promise<PlanInput['desired']> {
 	const rows = await env.db
-		.select({ e: listEntries, kind: lists.kind })
+		.select({ e: listEntries, kind: lists.kind, listServerId: lists.serverId })
 		.from(serverLists)
 		.innerJoin(lists, eq(lists.id, serverLists.listId))
 		.innerJoin(listEntries, eq(listEntries.listId, lists.id))
 		.where(and(eq(serverLists.serverId, server.id), isNull(listEntries.removedAt)));
 	const active = activeEntries(
-		rows.map((r) => ({ ...r.e, kind: r.kind })),
+		rows.map((r) => ({ ...r.e, kind: r.kind, serverId: r.listServerId })),
 		now
 	);
-	const bans = active
-		.filter((r) => r.kind === 'ban')
-		.map((r) => ({ steamId: r.steamId, reason: r.reason, listId: r.listId }));
-	const reserved = active
-		.filter((r) => r.kind === 'reserve')
-		.map((r) => ({
-			steamId: r.steamId,
-			listId: r.listId,
-			priority: r.priority,
-			addedAt: r.addedAt
-		}));
+	const { bans, reserved } = desiredOf(active);
 	if (org.membersReserved) {
-		// Members who set a SteamID get a slot from the org's reserve list, below every explicit
-		// entry when a server is full, unless the org has banned them.
+		// Members who set a SteamID get a slot from the org's reserve list, unless the org has
+		// banned them.
 		const [reserveList] = await env.db
 			.select({ id: lists.id })
 			.from(serverLists)
 			.innerJoin(lists, eq(lists.id, serverLists.listId))
-			.where(and(eq(serverLists.serverId, server.id), eq(lists.kind, 'reserve')))
+			.where(
+				and(eq(serverLists.serverId, server.id), eq(lists.kind, 'reserve'), isNull(lists.serverId))
+			)
 			.limit(1);
 		if (reserveList) {
 			const banned = new Set(bans.map((b) => b.steamId));
 			const have = new Set(reserved.map((r) => r.steamId));
 			for (const m of await memberSlots(env, server.orgId))
 				if (!banned.has(m.steamId) && !have.has(m.steamId))
-					reserved.push({
-						steamId: m.steamId,
-						listId: reserveList.id,
-						priority: MEMBER_PRIORITY,
-						addedAt: m.since
-					});
+					reserved.push({ steamId: m.steamId, listId: reserveList.id, member: true });
 		}
 	}
 	return { bans, reserved };
 }
-
-/** Explicit entries always outrank member-derived slots when a server's cap bites. */
-export const MEMBER_PRIORITY = -1_000_000;
 
 /** Members of the org who linked a SteamID on their account and are not disabled. */
 export async function memberSlots(
@@ -183,8 +172,8 @@ export async function memberSlots(
 }
 
 /**
- * Lifts bans whose expiry has passed: the row is marked removed (so history keeps it) and the
- * next reconcile takes it off every server the panel applied it to. The poller runs this every
+ * Lifts bans and reserved slots whose expiry has passed: the row is marked removed (so history
+ * keeps it) and the next reconcile takes it off every server the panel applied it to. The poller runs this every
  * tick and fanOut before pushing, so an install without a poller still catches up on edit.
  */
 export async function expireEntries(env: Env): Promise<{ lifted: number; orgIds: string[] }> {
@@ -203,7 +192,7 @@ export async function expireEntries(env: Env): Promise<{ lifted: number; orgIds:
 	if (!rows.length) return { lifted: 0, orgIds: [] };
 	const listIds = [...new Set(rows.map((r) => r.listId))];
 	const owners = await env.db
-		.select({ listId: lists.id, orgId: lists.orgId, orgName: organizations.name })
+		.select({ listId: lists.id, kind: lists.kind, orgId: lists.orgId, orgName: organizations.name })
 		.from(lists)
 		.innerJoin(organizations, eq(organizations.id, lists.orgId))
 		.where(inArray(lists.id, listIds));
@@ -217,7 +206,7 @@ export async function expireEntries(env: Env): Promise<{ lifted: number; orgIds:
 			action: 'list.expire',
 			target: ids.join(', '),
 			outcome: 'ok',
-			message: `${ids.length} ban${ids.length === 1 ? '' : 's'} expired in ${o.orgName}`,
+			message: `${ids.length} ${o.kind === 'ban' ? 'ban' : 'reserved slot'}${ids.length === 1 ? '' : 's'} expired in ${o.orgName}`,
 			detail: { orgId: o.orgId, org: o.orgName, steamIds: ids }
 		}).catch((err) => console.error('[warcon] list.expire audit', err));
 	}
@@ -312,6 +301,53 @@ export async function writeSnapshot(
 	});
 }
 
+/**
+ * A ban or reserved slot someone just added or removed by hand through the rcon actions: the
+ * copies in server_bans and server_reserved are brought in line at once, rather than at the
+ * worker's next re-read (five minutes by default), so no page keeps showing a slot the server no
+ * longer has, or misses one it just got. The worker's own re-read still follows and is the
+ * authority; this only closes the gap.
+ */
+export async function noteLocalEdit(
+	env: Env,
+	serverId: string,
+	kind: Kind,
+	op: 'add' | 'remove',
+	steamId: string,
+	reason = '',
+	ts = new Date()
+): Promise<void> {
+	if (kind === 'ban') {
+		if (op === 'remove') {
+			await env.db
+				.delete(serverBans)
+				.where(and(eq(serverBans.serverId, serverId), eq(serverBans.steamId, steamId)));
+			return;
+		}
+		await env.db
+			.insert(serverBans)
+			.values({ serverId, steamId, reason, seenAt: ts })
+			.onConflictDoUpdate({
+				target: [serverBans.serverId, serverBans.steamId],
+				set: { reason, seenAt: ts }
+			});
+		return;
+	}
+	if (op === 'remove') {
+		await env.db
+			.delete(serverReserved)
+			.where(and(eq(serverReserved.serverId, serverId), eq(serverReserved.steamId, steamId)));
+		return;
+	}
+	await env.db
+		.insert(serverReserved)
+		.values({ serverId, steamId, seenAt: ts })
+		.onConflictDoUpdate({
+			target: [serverReserved.serverId, serverReserved.steamId],
+			set: { seenAt: ts }
+		});
+}
+
 // ---- the run -----------------------------------------------------------------------------------
 
 export interface ReconcileOptions {
@@ -369,6 +405,7 @@ async function run(
 ): Promise<SyncResult> {
 	const now = new Date();
 	const desired = await desiredFor(env, server, org, now);
+	const panelBans = desired.bans.map(({ steamId, listId }) => ({ steamId, listId }));
 	const state = await env.db
 		.select()
 		.from(serverListState)
@@ -378,16 +415,13 @@ async function run(
 		.from(serverListSync)
 		.where(eq(serverListSync.serverId, server.id))
 		.limit(1);
-	let cap = syncRow?.reservedCap ?? null;
-	let capCheckedAt = syncRow?.capCheckedAt ?? null;
 
 	const planWith = (observed: Observed) =>
 		planSync({
 			now,
-			cap,
 			retryAfterMs: RETRY_AFTER_MS,
 			desired,
-			observed: { bans: observed.bans.map((b) => b.steamId), reserved: observed.reserved },
+			observed: { reserved: observed.reserved },
 			state
 		});
 
@@ -397,22 +431,14 @@ async function run(
 	let plan = planWith(observed);
 	let client = opts.client;
 	let reserve: ReserveMode = { writable: true, viaConfig: false };
-	const wantsReserve = desired.reserved.some((d) => !observed.reserved.includes(d.steamId));
-	if (
-		!planHasWork(plan) &&
-		!plan.overflow.length &&
-		!wantsReserve &&
-		plan.confirms.length === 0 &&
-		plan.deletes.length === 0
-	) {
-		await bookkeep(env, server.id, {
-			syncedAt: now,
-			reservedCap: cap,
-			reservedUsed: plan.reservedUsed,
-			capCheckedAt,
-			lastError: ''
-		});
-		return { ...base, ok: true, observed: flat(observed) };
+	if (!planHasWork(plan) && plan.confirms.length === 0 && plan.deletes.length === 0) {
+		await bookkeep(env, server.id, { syncedAt: now, lastError: '' });
+		return {
+			...base,
+			ok: true,
+			observed: flat(observed),
+			bans: panelBans
+		};
 	}
 	try {
 		client ??= await WardogsClient.forServer(env, server);
@@ -420,17 +446,6 @@ async function run(
 			observed = await liveObserved(client);
 			fresh = true;
 			await writeSnapshot(env, server.id, observed, now);
-		}
-		// The cap matters only when there are reserved slots to hand out; read it each time then,
-		// since an admin may have just changed MaxReservedSlots to make room.
-		if (wantsReserve) {
-			try {
-				const cfg = (await ACTIONS.config.run(client, {})) as { text?: string };
-				cap = parseMaxReservedSlots(cfg.text || '');
-			} catch {
-				cap = null;
-			}
-			capCheckedAt = now;
 		}
 		plan = planWith(observed);
 		// Live builds since CL-499480 have no reserved-slot routes and answer those calls 404, which
@@ -451,30 +466,17 @@ async function run(
 		}
 	} catch (err) {
 		const message = publicMessage(err, 'Could not reach the server.');
-		await bookkeep(env, server.id, {
-			syncedAt: syncRow?.syncedAt ?? null,
-			reservedCap: cap,
-			reservedUsed: syncRow?.reservedUsed ?? 0,
-			capCheckedAt,
-			lastError: message
-		});
+		await bookkeep(env, server.id, { syncedAt: syncRow?.syncedAt ?? null, lastError: message });
 		return { ...base, error: message };
 	}
 
 	const outcome = await execute(client, plan, observed, reserve);
 	await record(env, server.id, plan, outcome, now, {
 		syncedAt: now,
-		reservedCap: cap,
-		reservedUsed: plan.reservedUsed - outcome.failedAdds.filter((f) => f.kind === 'reserve').length,
-		capCheckedAt,
 		lastError: outcome.aborted ?? ''
 	});
 
-	const failedNow = [
-		...outcome.failedAdds,
-		...outcome.failedRemoves,
-		...plan.overflow.map((o) => ({ ...o, error: o.error }))
-	];
+	const failedNow = [...outcome.failedAdds, ...outcome.failedRemoves];
 	const previous = new Map(state.map((s) => [`${s.kind}:${s.steamId}`, s.error]));
 	const newFailures = failedNow.filter((f) => previous.get(`${f.kind}:${f.steamId}`) !== f.error);
 	if (outcome.added.length || outcome.removed.length || newFailures.length || outcome.aborted) {
@@ -508,7 +510,8 @@ async function run(
 		removed: outcome.removed.length,
 		failed: failedNow.length,
 		error: outcome.aborted ?? '',
-		observed: flat(outcome.observed)
+		observed: flat(outcome.observed),
+		bans: panelBans
 	};
 }
 
@@ -578,9 +581,9 @@ async function execute(
 			continue;
 		}
 		try {
-			await (r.kind === 'ban' ? ACTIONS.unban : ACTIONS.reservedRemove).run(client, {
+			await ACTIONS.reservedRemove.run(client, {
 				steamId: r.steamId,
-				viaConfig: r.kind === 'reserve' && reserve.viaConfig
+				viaConfig: reserve.viaConfig
 			});
 			out.removed.push(r);
 			dropObserved(r.kind, r.steamId);
@@ -601,10 +604,9 @@ async function execute(
 			continue;
 		}
 		try {
-			await (a.kind === 'ban' ? ACTIONS.ban : ACTIONS.reservedAdd).run(client, {
+			await ACTIONS.reservedAdd.run(client, {
 				steamId: a.steamId,
-				reason: a.reason || undefined,
-				viaConfig: a.kind === 'reserve' && reserve.viaConfig
+				viaConfig: reserve.viaConfig
 			});
 			out.added.push(a);
 			addObserved(a.kind, a.steamId, a.reason);
@@ -616,11 +618,7 @@ async function execute(
 			} else if (isUnreachable(f)) {
 				out.aborted = f.message;
 				return out;
-			} else
-				out.failedAdds.push({
-					...a,
-					error: f.code === 'reserved_full' ? `${RESERVED_FULL}: ${f.message}` : f.message
-				});
+			} else out.failedAdds.push({ ...a, error: f.message });
 		}
 	}
 	return out;
@@ -628,9 +626,6 @@ async function execute(
 
 interface Bookkeeping {
 	syncedAt: Date | null;
-	reservedCap: number | null;
-	reservedUsed: number;
-	capCheckedAt: Date | null;
 	lastError: string;
 }
 
@@ -650,8 +645,7 @@ async function record(
 	now: Date,
 	b: Bookkeeping
 ): Promise<void> {
-	type Upsert = typeof serverListState.$inferInsert;
-	const applied = (r: { kind: Kind; steamId: string; listId: string }): Upsert => ({
+	const applied = (r: { kind: Kind; steamId: string; listId: string }): StateUpsert => ({
 		serverId,
 		kind: r.kind,
 		steamId: r.steamId,
@@ -661,7 +655,12 @@ async function record(
 		attemptedAt: now,
 		updatedAt: now
 	});
-	const failed = (r: { kind: Kind; steamId: string; listId?: string; error: string }): Upsert => ({
+	const failed = (r: {
+		kind: Kind;
+		steamId: string;
+		listId?: string;
+		error: string;
+	}): StateUpsert => ({
 		serverId,
 		kind: r.kind,
 		steamId: r.steamId,
@@ -671,29 +670,15 @@ async function record(
 		attemptedAt: now,
 		updatedAt: now
 	});
-	const upserts: Upsert[] = [
+	const upserts: StateUpsert[] = [
 		...o.added.map(applied),
 		...plan.confirms.map(applied),
 		...o.failedAdds.map(failed),
-		...plan.overflow.map(failed),
 		...o.failedRemoves.map((f) => failed({ ...f }))
 	];
 	const drops = [...o.removed, ...plan.deletes];
 	await env.db.transaction(async (tx) => {
-		for (const u of upserts)
-			await tx
-				.insert(serverListState)
-				.values(u)
-				.onConflictDoUpdate({
-					target: [serverListState.serverId, serverListState.kind, serverListState.steamId],
-					set: {
-						sourceListId: u.sourceListId,
-						state: u.state,
-						error: u.error,
-						attemptedAt: u.attemptedAt,
-						updatedAt: u.updatedAt
-					}
-				});
+		for (const u of upserts) await upsertState(tx, u);
 		for (const d of drops)
 			await tx
 				.delete(serverListState)
@@ -710,6 +695,106 @@ async function record(
 			.onConflictDoUpdate({ target: serverListSync.serverId, set: { ...b, updatedAt: now } });
 	});
 	await writeSnapshot(env, serverId, o.observed, now);
+}
+
+type StateUpsert = typeof serverListState.$inferInsert;
+
+async function upsertState(db: DbOrTx, u: StateUpsert): Promise<void> {
+	await db
+		.insert(serverListState)
+		.values(u)
+		.onConflictDoUpdate({
+			target: [serverListState.serverId, serverListState.kind, serverListState.steamId],
+			set: {
+				sourceListId: u.sourceListId,
+				state: u.state,
+				error: u.error,
+				attemptedAt: u.attemptedAt,
+				updatedAt: u.updatedAt
+			}
+		});
+}
+
+// ---- bans, enforced by the panel -----------------------------------------------------------------
+
+/** How long a kick the game refused waits before it is tried again on the same player. */
+const KICK_RETRY_MS = 30_000;
+
+/**
+ * A server's bans are the panel's alone: nothing is written to the game's ban list (some hosts
+ * keep that list in a file an unban never leaves). The worker holds the bans its lists put on the
+ * server (`bans`, from the last sync) and this removes any of those players found on it: one kick,
+ * with the org's ban message as it reads now, on the connection the observation already holds.
+ * Nothing at all happens on a server whose players are not banned.
+ *
+ * The worker's copy is as old as the last sync, so the entry is read again before the kick: one
+ * taken off its list or run out since then removes nobody. That is one query, and only when such
+ * a player is actually on the server.
+ */
+export async function kickBanned(
+	env: Env,
+	server: ServerRow,
+	org: OrgRow,
+	client: WardogsClient,
+	present: string[],
+	bans: Map<string, PanelBan>
+): Promise<void> {
+	for (const steamId of present) {
+		const b = bans.get(steamId);
+		if (!b) continue;
+		const now = new Date();
+		if (b.retryAt && b.retryAt > now.getTime()) continue;
+		const entry = await liveEntry(env, server.id, b, now);
+		if (!entry) {
+			bans.delete(steamId);
+			continue;
+		}
+		let error = '';
+		try {
+			await ACTIONS.kick.run(client, {
+				steamId,
+				reason: renderBanMessage(org.banMessage, { ...entry, entryId: entry.id })
+			});
+		} catch (err) {
+			const f = failure(err);
+			// gone between the look and the kick: that is what was wanted
+			if (isGone(f)) continue;
+			if (isUnreachable(f)) return;
+			b.retryAt = now.getTime() + KICK_RETRY_MS;
+			error = f.message;
+		}
+		await writeAudit(env, null, {
+			actorName: 'ban list',
+			server: { id: server.id, name: server.name },
+			orgId: server.orgId,
+			category: 'system',
+			action: 'ban.enforce',
+			target: steamId,
+			outcome: error ? 'error' : 'ok',
+			status: error ? 502 : 200,
+			message: error ? `Could not remove a banned player: ${error}` : 'Banned player removed',
+			detail: { banId: banUid(entry.id) }
+		}).catch((err) => console.error('[warcon] ban.enforce audit', err));
+	}
+}
+
+/** The entry behind a ban, if it is still live on a list the server subscribes to. */
+async function liveEntry(env: Env, serverId: string, b: PanelBan, now: Date) {
+	const [row] = await env.db
+		.select({ entry: listEntries })
+		.from(serverLists)
+		.innerJoin(listEntries, eq(listEntries.listId, serverLists.listId))
+		.where(
+			and(
+				eq(serverLists.serverId, serverId),
+				eq(serverLists.listId, b.listId),
+				eq(listEntries.steamId, b.steamId),
+				isNull(listEntries.removedAt),
+				or(isNull(listEntries.expiresAt), gt(listEntries.expiresAt, now))
+			)
+		)
+		.limit(1);
+	return row?.entry ?? null;
 }
 
 // ---- fan-out from the API ----------------------------------------------------------------------
@@ -751,18 +836,14 @@ export async function fanOut(env: Env, org: OrgRow): Promise<ListSyncSummary> {
 			return Promise.race([work, timer]);
 		})
 	);
-	return {
-		servers: results.map(
-			({ serverId, serverName, ok, added, removed, failed, pending, error }) => ({
-				serverId,
-				serverName,
-				ok,
-				added,
-				removed,
-				failed,
-				pending,
-				error
-			})
-		)
-	};
+	return { servers: results.map(summaryOf) };
+}
+
+/**
+ * What an API answer says of a sync: where it landed, in counts. The rest of a SyncResult is the
+ * worker's own (the server's lists, and the bans the worker enforces) and never leaves.
+ */
+export function summaryOf(r: SyncResult): ListSyncServer {
+	const { serverId, serverName, ok, added, removed, failed, pending, error } = r;
+	return { serverId, serverName, ok, added, removed, failed, pending, error };
 }

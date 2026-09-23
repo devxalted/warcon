@@ -1,21 +1,28 @@
-// Automation: per-server triggers the worker evaluates on every observation. Four kinds, all
+// Automation: per-server triggers the worker evaluates on every observation, all
 // built on what the worker already sees (joins, player counts, empty stretches) plus the Steam cache:
 //   welcome      whisper a message to players as they join (or once they have picked a faction)
 //   faction_change  whisper a message to players who switch from one faction to another
-//   broadcast    rotate through messages every N minutes while enough people are on
+//   broadcast    rotate through messages every N minutes while the player count is in its band
 //   empty_reset  send an empty server back to a chosen map after N minutes
 //   risk_kick    kick joiners who match Steam / ban-list rules (see risk.ts)
+//   ping_kick    kick players whose ping stays above a limit
+//   team_kill    whisper or kick a player over team kills the kill feed reports (feed-events.ts)
+//   seed_reward  hand players who stay through a low population a reserved slot, on this server
+//                or across the org
 // The worker evaluates them on every observation and writes the actions they want to the outbox
 // (outbox.ts delivers, and every delivery lands in the audit trail as category "trigger"). A dry
 // run replays the last 24 hours from the samples and sessions tables so a rule can be checked
 // before it touches anyone.
-import { and, asc, desc, eq, gte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { Env } from './env';
 import { ApiError, int, newId, str } from './http';
 import { writeAudit } from './audit';
 import {
+	kills,
 	playerSessions,
 	samples,
+	serverLive,
+	servers,
 	triggers,
 	type ServerRow,
 	type SteamProfileRow,
@@ -25,13 +32,19 @@ import { getProfiles, steamEnabled } from './steam';
 import { localSignals, orgServers, type LocalSignals } from './players';
 import { gateway } from './gateway';
 import type { SessionUser } from './access';
+import type { ServerAccess } from './access-resolve';
+import { CAPABILITY_INFO, type Capability } from '$lib/capabilities';
 import type { DryRunResult, Player, Status, TriggerKind, TriggerView } from '$lib/types';
 import {
+	broadcastWanted,
 	factionChangeTargets,
 	isTriggerKind,
 	onTarget,
 	renderTemplate,
+	restartNoticeStage,
 	riskKickVerdict,
+	pingKickStep,
+	teamKillStage,
 	TRIGGER_LABELS,
 	validateConfig,
 	welcomeTargets,
@@ -39,9 +52,28 @@ import {
 	type EmptyResetConfig,
 	type FactionChangeConfig,
 	type FactionPick,
+	type RestartNoticeConfig,
+	type RestartNoticeState,
+	fullMoments,
+	lowStretches,
+	matchBroadcastMessages,
+	matchReplay,
+	seedReplay,
+	type MatchBroadcastConfig,
+	type MatchEnd,
 	type RiskKickConfig,
+	type PingKickConfig,
+	type PingKickState,
+	type SeedRewardConfig,
+	type TeamKillConfig,
 	type WelcomeConfig
 } from './trigger-rules';
+import { NAME_FLAG, nameFilterTargets, nameVerdict, type NameFilterConfig } from './name-filter';
+import { fmtUptime, RESTART_AFTER_HOURS, restartWindow } from '$lib/uptime';
+import { DEFAULT_SCORE_CAP, scoreCapOf } from '$lib/match';
+import { settings } from './settings';
+import { riskPerformanceFor } from './leaderboards';
+import type { RiskPerformance } from './risk';
 
 export * from './trigger-rules';
 
@@ -80,17 +112,73 @@ async function triggerOf(env: Env, serverId: string, id: string): Promise<Trigge
 	return row;
 }
 
+/**
+ * A rule acts without anyone at the controls, so saving it needs the capability its author would
+ * need to do the same by hand: a rule that kicks needs Kick players, not only Automation.
+ */
+const RULE_NEEDS: Record<Exclude<TriggerKind, 'seed_reward'>, [Capability, string]> = {
+	welcome: ['chat.send', 'messages players'],
+	faction_change: ['chat.send', 'messages players'],
+	broadcast: ['chat.send', 'messages players'],
+	restart_notice: ['chat.send', 'messages players'],
+	match_broadcast: ['chat.send', 'messages players'],
+	empty_reset: ['match.control', 'changes the map'],
+	risk_kick: ['players.moderate', 'kicks players'],
+	name_filter: ['players.moderate', 'kicks players'],
+	ping_kick: ['players.moderate', 'kicks players'],
+	team_kill: ['players.moderate', 'kicks players']
+};
+
+/** What one rule needs of whoever saves it. The Seeding reward reserves slots: here, or on the organisation's list. */
+export function ruleNeeds(kind: TriggerKind, config: unknown): [Capability, string] {
+	if (kind !== 'seed_reward') return RULE_NEEDS[kind];
+	return (config as Partial<SeedRewardConfig> | null)?.scope !== 'server'
+		? ['lists.edit', "edits the organisation's reserved-slot list"]
+		: ['slots.manage', 'reserves slots on this server'];
+}
+
+export function requireRuleCaps(
+	kind: TriggerKind,
+	config: unknown,
+	server: ServerRow,
+	access: ServerAccess
+): void {
+	const [cap, does] = ruleNeeds(kind, config);
+	if (access.caps.has(cap)) return;
+	throw new ApiError(
+		403,
+		`A ${TRIGGER_LABELS[kind]} rule ${does}, which needs '${CAPABILITY_INFO[cap].label}' on ${server.name}; your role '${access.roleName}' does not include it.`,
+		'forbidden'
+	);
+}
+
 export async function createTrigger(
 	env: Env,
 	req: Request,
 	user: SessionUser,
 	server: ServerRow,
+	access: ServerAccess,
 	body: Record<string, unknown>
 ): Promise<TriggerView> {
 	if (!isTriggerKind(body.kind)) throw new ApiError(400, 'Unknown trigger kind.');
 	const kind = body.kind;
 	const config = validateConfig(kind, body.config);
+	requireRuleCaps(kind, config, server, access);
 	const name = str(body.name, 60) || TRIGGER_LABELS[kind];
+	// Seed time is one count per server, taken against one threshold, so one rule holds it.
+	if (kind === 'seed_reward') {
+		const [other] = await env.db
+			.select({ name: triggers.name })
+			.from(triggers)
+			.where(and(eq(triggers.serverId, server.id), eq(triggers.kind, 'seed_reward')))
+			.limit(1);
+		if (other)
+			throw new ApiError(
+				409,
+				`This server already has a ${TRIGGER_LABELS[kind]} rule ("${other.name}"); edit that one instead.`,
+				'duplicate'
+			);
+	}
 	const [row] = await env.db
 		.insert(triggers)
 		.values({
@@ -123,6 +211,7 @@ export async function updateTrigger(
 	req: Request,
 	user: SessionUser,
 	server: ServerRow,
+	access: ServerAccess,
 	id: string,
 	body: Record<string, unknown>
 ): Promise<TriggerView> {
@@ -131,6 +220,9 @@ export async function updateTrigger(
 	if (body.name !== undefined) set.name = str(body.name, 60) || row.name;
 	if (body.enabled !== undefined) set.enabled = !!body.enabled;
 	if (body.config !== undefined) set.config = validateConfig(row.kind, body.config);
+	if (row.kind === 'ping_kick' && (body.config !== undefined || body.enabled !== undefined))
+		set.state = null;
+	requireRuleCaps(row.kind, set.config ?? row.config, server, access);
 	if (!Object.keys(set).length) throw new ApiError(400, 'Nothing to update.');
 	set.updatedAt = new Date();
 	const [updated] = await env.db
@@ -183,8 +275,13 @@ export interface TickContext {
 	server: ServerRow;
 	status: Status;
 	players: Player[];
+	/** true only when this observation fetched a fresh player list */
+	playersObserved: boolean;
+	playersIntervalMs: number;
 	/** players with no open session before this observation (empty when joins are not trusted) */
 	joined: Player[];
+	/** players still on under a name their session did not hold at the last look */
+	renamed: Player[];
 	/** players whose faction is new since the last look (joiners arriving with one included;
 	 *  empty when joins are not trusted) */
 	factioned: FactionPick<Player>[];
@@ -192,9 +289,18 @@ export interface TickContext {
 	firstVisit: Set<string>;
 	/** SteamIDs with a reserved slot */
 	reserved: Set<string>;
+	/** false until the worker has read the server's reserved list since it started */
+	reservedLoaded: boolean;
+	/** seed time so far of the open sessions, by SteamID (empty while no seeding rule is on) */
+	seedMs: Map<string, number>;
 	/** pre-fetched for risk rules: the panel's own signals and Steam profiles of the joiners */
 	signals: Map<string, LocalSignals>;
 	profiles: Map<string, SteamProfileRow>;
+	performance: Map<string, RiskPerformance>;
+	/** when the game process started (ms), from GET /v1/health; 0 while unknown */
+	startedAt: number;
+	/** the match that ended between the previous look and this one, or null */
+	matchEnd: MatchEnd | null;
 	ts: Date;
 }
 
@@ -231,7 +337,8 @@ const vars = (ctx: TickContext, p?: Player, previous = '') => ({
 	server: ctx.status.serverName || ctx.server.name,
 	map: ctx.status.map,
 	players: ctx.status.playerCount,
-	max: ctx.status.maxPlayers
+	max: ctx.status.maxPlayers,
+	cap: scoreCapOf(ctx.status)
 });
 
 // Enabled triggers per server, cached briefly: the worker asks on every observation.
@@ -261,6 +368,10 @@ export async function enabledTriggers(env: Env, serverId: string): Promise<Trigg
 export const needsRiskInputs = (rows: TriggerRow[]): boolean =>
 	rows.some((r) => r.kind === 'risk_kick');
 
+/** True when a rule kicks at a risk level, the only thing the recorded games feed. */
+export const needsRiskPerformance = (rows: TriggerRow[]): boolean =>
+	rows.some((r) => r.kind === 'risk_kick' && !!(r.config as RiskKickConfig).kickAtLevel);
+
 /** Evaluates the rules against one observation. Never throws; a broken rule records its error. */
 export async function evaluateTriggers(
 	env: Env,
@@ -285,6 +396,24 @@ export async function evaluateTriggers(
 					break;
 				case 'risk_kick':
 					evalRiskKick(env, ctx, row, row.config as RiskKickConfig, out);
+					break;
+				case 'ping_kick':
+					evalPingKick(ctx, row, row.config as PingKickConfig, out);
+					break;
+				case 'restart_notice':
+					evalRestartNotice(ctx, row, row.config as RestartNoticeConfig, out);
+					break;
+				case 'team_kill':
+					// Acted on as kills arrive (feed-events.ts), not per observation.
+					break;
+				case 'seed_reward':
+					await evalSeedReward(env, ctx, row, row.config as SeedRewardConfig, out);
+					break;
+				case 'match_broadcast':
+					evalMatchBroadcast(ctx, row, row.config as MatchBroadcastConfig, out);
+					break;
+				case 'name_filter':
+					evalNameFilter(ctx, row, row.config as NameFilterConfig, out);
 					break;
 			}
 		} catch (err) {
@@ -356,7 +485,7 @@ function evalFactionChange(
 }
 
 function evalBroadcast(ctx: TickContext, row: TriggerRow, cfg: BroadcastConfig, out: Evaluation) {
-	if (ctx.status.playerCount < cfg.minPlayers) return;
+	if (!broadcastWanted(cfg, ctx.status.playerCount)) return;
 	const due =
 		!row.lastFiredAt || ctx.ts.getTime() - row.lastFiredAt.getTime() >= cfg.everyMinutes * 60_000;
 	if (!due) return;
@@ -456,7 +585,9 @@ function evalRiskKick(
 			steamEnabled: steamEnabled(env),
 			bannedOn: l?.bannedOn ?? [],
 			watched: l?.watched ?? null,
+			resembles: l?.resembles ?? [],
 			reserved: ctx.reserved.has(p.steamId),
+			performance: ctx.performance.get(p.steamId),
 			now: ctx.ts
 		});
 		if (!verdict) continue;
@@ -481,15 +612,287 @@ function evalRiskKick(
 		});
 }
 
-/** The risk inputs a risk_kick rule needs for these joiners (DB and Steam; call before the transaction). */
+function evalNameFilter(ctx: TickContext, row: TriggerRow, cfg: NameFilterConfig, out: Evaluation) {
+	if (!ctx.joined.length && !ctx.renamed.length) return;
+	// A name is judged when it is first seen, at the join or later: the clan tag is part of the
+	// name, and the game may only show it once the player is in.
+	const named = ctx.renamed.length ? [...ctx.joined, ...ctx.renamed] : ctx.joined;
+	let n = 0;
+	let last = '';
+	for (const { player: p, verdict: v } of nameFilterTargets(cfg, named, ctx.reserved)) {
+		const kick = cfg.action === 'kick';
+		out.intents.push({
+			trigger: row,
+			action: kick ? 'kick' : NAME_FLAG,
+			params: kick
+				? {
+						steamId: p.steamId,
+						reason: renderTemplate(cfg.reason, { ...vars(ctx, p), why: v.why })
+					}
+				: {},
+			target: p.steamId,
+			okMessage: `${kick ? 'Kicked' : 'Flagged'} ${p.name}: ${v.verdict}`,
+			detail: { name: p.name, verdict: v.verdict },
+			steamId: p.steamId,
+			dedupeKey: key(row, p.steamId, ctx.ts.getTime())
+		});
+		n++;
+		last = `${p.name}: ${v.verdict}`;
+	}
+	if (n) {
+		const doing = cfg.action === 'kick' ? 'Kicking' : 'Flagging';
+		out.updates.push({
+			id: row.id,
+			lastFiredAt: ctx.ts,
+			lastResult: n === 1 ? `${doing} ${last}` : `${doing} ${n} players`
+		});
+	}
+}
+
+function evalPingKick(ctx: TickContext, row: TriggerRow, cfg: PingKickConfig, out: Evaluation) {
+	if (!ctx.playersObserved) return;
+	const previous = row.state as PingKickState | null;
+	const { state, kicks } = pingKickStep(
+		cfg,
+		previous,
+		ctx.players,
+		ctx.ts.getTime(),
+		2 * Math.max(ctx.playersIntervalMs, 1000) + 1000
+	);
+	// The state is written with any intents, and kept in the cached row for the next poll.
+	row.state = state;
+	if (
+		Object.keys(state.players).length ||
+		Object.keys(previous?.players ?? {}).length ||
+		kicks.length
+	)
+		out.updates.push({ id: row.id, state });
+	const kicked = new Set(kicks);
+	for (const p of ctx.players) {
+		if (!kicked.has(p.steamId)) continue;
+		const steamId = p.steamId;
+		const verdict = `ping ${p.ping} ms above ${cfg.maxPingMs} ms for ${cfg.durationSeconds} s`;
+		out.intents.push({
+			trigger: row,
+			action: 'kick',
+			params: { steamId, reason: cfg.reason },
+			target: steamId,
+			okMessage: `Kicked ${p.name}: ${verdict}`,
+			detail: { name: p.name, pingMs: p.ping, verdict },
+			steamId,
+			dedupeKey: key(row, steamId, state.players[steamId].since)
+		});
+	}
+	if (kicks.length)
+		out.updates[out.updates.length - 1] = {
+			id: row.id,
+			state,
+			lastFiredAt: ctx.ts,
+			lastResult:
+				kicks.length === 1
+					? `Kicking ${ctx.players.find((p) => p.steamId === kicks[0])?.name}: high ping`
+					: `Kicking ${kicks.length} players: high ping`
+		};
+}
+
+function evalRestartNotice(
+	ctx: TickContext,
+	row: TriggerRow,
+	cfg: RestartNoticeConfig,
+	out: Evaluation
+) {
+	const hit = restartNoticeStage(cfg, row.state as RestartNoticeState | null, {
+		startedAt: ctx.startedAt,
+		playerCount: ctx.status.playerCount,
+		now: ctx.ts.getTime()
+	});
+	if (!hit) return;
+	const message = renderTemplate(hit.stage === 'lead' ? cfg.leadMessage : cfg.message, {
+		...vars(ctx),
+		minutes: hit.minutes,
+		uptime: fmtUptime(ctx.ts.getTime() - ctx.startedAt)
+	});
+	out.intents.push({
+		trigger: row,
+		action: 'broadcast',
+		params: { message },
+		target: message,
+		okMessage: 'Broadcast sent.',
+		detail: { stage: hit.stage, startedAt: new Date(ctx.startedAt).toISOString() },
+		steamId: null,
+		dedupeKey: key(row, hit.stage, ctx.startedAt, hit.stage === 'due' ? ctx.ts.getTime() : 0)
+	});
+	// The stage is marked now so a slow delivery cannot send it twice.
+	row.lastFiredAt = ctx.ts;
+	row.state = hit.state;
+	out.updates.push({
+		id: row.id,
+		lastFiredAt: ctx.ts,
+		lastResult: `Sending: ${message}`,
+		state: hit.state
+	});
+}
+
+// A match boundary is one tick, so the rule keeps no state: the end message then the start
+// message, each an outbox row keyed on the tick.
+function evalMatchBroadcast(
+	ctx: TickContext,
+	row: TriggerRow,
+	cfg: MatchBroadcastConfig,
+	out: Evaluation
+) {
+	if (!ctx.matchEnd) return;
+	const sends = matchBroadcastMessages(cfg, ctx.matchEnd, ctx.status.playerCount, vars(ctx));
+	if (!sends.length) return;
+	for (const { stage, message } of sends)
+		out.intents.push({
+			trigger: row,
+			action: 'broadcast',
+			params: { message },
+			target: message,
+			okMessage: 'Broadcast sent.',
+			detail: {
+				stage,
+				map: ctx.matchEnd.map,
+				winner: ctx.matchEnd.winner,
+				scores: ctx.matchEnd.scores
+			},
+			steamId: null,
+			dedupeKey: key(row, stage, ctx.ts.getTime())
+		});
+	row.lastFiredAt = ctx.ts;
+	out.updates.push({
+		id: row.id,
+		lastFiredAt: ctx.ts,
+		lastResult: `Sending: ${sends.map((s) => s.message).join(' / ')}`.slice(0, 300)
+	});
+}
+
+// A seeding rule adds up seed time once a minute per server while the server is low, not per
+// observation: the open sessions from memory, the closed ones in the window from the database.
+// Above the threshold nobody is earning, so nothing is checked; the fleet's busy servers cost
+// nothing here.
+const SEED_CHECK_MS = 60_000;
+const seedState = new Map<string, { checkedAt: number; low: boolean; full: boolean }>();
+
+const dateOf = (d: Date) => d.toISOString().slice(0, 10);
+
+async function evalSeedReward(
+	env: Env,
+	ctx: TickContext,
+	row: TriggerRow,
+	cfg: SeedRewardConfig,
+	out: Evaluation
+) {
+	// Not before the reserved list is known: a player reserved on this server alone must not be
+	// handed an org-wide entry because the worker has not read the list yet.
+	if (!ctx.reservedLoaded) return;
+	const now = ctx.ts.getTime();
+	const state = seedState.get(row.id) ?? { checkedAt: 0, low: false, full: false };
+	const low = ctx.players.length <= cfg.lowAt;
+	const full = ctx.players.length >= (cfg.fullAt ?? (ctx.status.maxPlayers || Infinity));
+	// Every minute while low (returning players may already hold enough banked time); once when
+	// the seed time banks, which is the moment the server fills, or, when every low minute
+	// counts, as the count climbs out of the band; and not at all otherwise.
+	const due = low
+		? now - state.checkedAt >= SEED_CHECK_MS
+		: cfg.untilFull
+			? full && !state.full
+			: state.low;
+	seedState.set(row.id, { checkedAt: due ? now : state.checkedAt, low, full });
+	if (!due) return;
+	const candidates = ctx.players.filter((p) => !ctx.reserved.has(p.steamId));
+	if (!candidates.length) return;
+	const from = new Date(now - cfg.windowDays * 86400_000);
+	const closed = await env.db
+		.select({ steamId: playerSessions.steamId, seconds: sql<number>`SUM(seed_seconds)::int` })
+		.from(playerSessions)
+		.where(
+			and(
+				eq(playerSessions.serverId, ctx.server.id),
+				inArray(
+					playerSessions.steamId,
+					candidates.map((p) => p.steamId)
+				),
+				isNotNull(playerSessions.leftAt),
+				gte(playerSessions.lastSeen, from)
+			)
+		)
+		.groupBy(playerSessions.steamId);
+	const earlier = new Map(closed.map((r) => [r.steamId, r.seconds]));
+	// The whisper names this date; the entry's own expiry is set when the grant is delivered.
+	const expiresAt = new Date(now + cfg.slotDays * 86400_000);
+	let n = 0;
+	let last = '';
+	for (const p of candidates) {
+		const seconds =
+			(earlier.get(p.steamId) ?? 0) + Math.floor((ctx.seedMs.get(p.steamId) ?? 0) / 1000);
+		if (seconds < cfg.minutes * 60) continue;
+		const minutes = Math.floor(seconds / 60);
+		const reason = `Seeded ${ctx.server.name}: ${minutes} min with ${cfg.lowAt} or fewer on`;
+		out.intents.push({
+			trigger: row,
+			action: 'seed_reward',
+			params: {
+				steamId: p.steamId,
+				name: p.name,
+				reason,
+				slotDays: cfg.slotDays,
+				scope: cfg.scope === 'server' ? 'server' : 'org'
+			},
+			target: p.steamId,
+			okMessage: `Reserved a slot for ${p.name}.`,
+			detail: { name: p.name, minutes, slotDays: cfg.slotDays },
+			// The slot was earned; it is granted even if the player leaves before delivery.
+			steamId: null,
+			dedupeKey: key(row, p.steamId, now)
+		});
+		if (cfg.message) {
+			const message = renderTemplate(cfg.message, {
+				...vars(ctx, p),
+				minutes,
+				until: dateOf(expiresAt),
+				days: cfg.slotDays
+			});
+			out.intents.push({
+				trigger: row,
+				action: 'whisper',
+				params: { steamId: p.steamId, message },
+				target: p.steamId,
+				okMessage: `Whispered ${p.name}.`,
+				detail: { name: p.name },
+				steamId: p.steamId,
+				dedupeKey: key(row, p.steamId, 'whisper', now)
+			});
+		}
+		n++;
+		last = p.name;
+	}
+	if (n)
+		out.updates.push({
+			id: row.id,
+			lastFiredAt: ctx.ts,
+			lastResult: `Reserving a slot for ${n === 1 ? last : `${n} players`}`
+		});
+}
+
+/**
+ * The risk inputs a risk_kick rule needs for these joiners (DB and Steam; call before the
+ * transaction). The recorded games are read only when a rule kicks at a risk level.
+ */
 export async function riskInputs(
 	env: Env,
 	server: ServerRow,
-	joined: Player[]
-): Promise<{ signals: Map<string, LocalSignals>; profiles: Map<string, SteamProfileRow> }> {
-	if (!joined.length) return { signals: new Map(), profiles: new Map() };
+	joined: Player[],
+	withPerformance: boolean
+): Promise<{
+	signals: Map<string, LocalSignals>;
+	profiles: Map<string, SteamProfileRow>;
+	performance: Map<string, RiskPerformance>;
+}> {
+	if (!joined.length) return { signals: new Map(), profiles: new Map(), performance: new Map() };
 	const org = await orgServers(env, server.orgId);
-	const [signals, profiles] = await Promise.all([
+	const [signals, profiles, performance] = await Promise.all([
 		localSignals(
 			env,
 			server.orgId,
@@ -502,9 +905,16 @@ export async function riskInputs(
 					env,
 					joined.map((p) => p.steamId)
 				)
-			: new Map<string, SteamProfileRow>()
+			: new Map<string, SteamProfileRow>(),
+		withPerformance
+			? riskPerformanceFor(
+					env,
+					org.map((s) => s.id),
+					joined.map((p) => p.steamId)
+				)
+			: new Map<string, RiskPerformance>()
 	]);
-	return { signals, profiles };
+	return { signals, profiles, performance };
 }
 
 /** Records a delivery outcome on the trigger row and in the audit trail. */
@@ -540,6 +950,8 @@ export async function recordDelivery(
 }
 
 // ---- dry run ------------------------------------------------------------------------------------
+
+const NAME_REPLAY_MAX = 5000;
 
 /** Replays the last 24 hours of this server's history against a rule. Touches nobody. */
 export async function dryRun(
@@ -604,6 +1016,12 @@ export async function dryRun(
 		);
 		return result;
 	}
+	if (kind === 'ping_kick') {
+		result.notes.push(
+			'Ping is not stored in historical samples, so past high-ping streaks cannot be replayed. The live rule checks each fresh player-list sample and resets a streak when ping recovers, becomes unavailable, or sampling is interrupted.'
+		);
+		return result;
+	}
 	if (kind === 'risk_kick') {
 		const c = cfg as RiskKickConfig;
 		const rows = await joins();
@@ -621,7 +1039,7 @@ export async function dryRun(
 				result.notes.push('Could not read the reserved slots; nobody was spared for one.');
 			}
 		}
-		const [signals, profiles] = await Promise.all([
+		const [signals, profiles, performance] = await Promise.all([
 			localSignals(
 				env,
 				server.orgId,
@@ -634,7 +1052,14 @@ export async function dryRun(
 						env,
 						players.slice(0, 200).map((p) => p.steamId)
 					)
-				: new Map()
+				: new Map(),
+			c.kickAtLevel
+				? riskPerformanceFor(
+						env,
+						org.map((s) => s.id),
+						players.map((p) => p.steamId)
+					)
+				: new Map<string, RiskPerformance>()
 		]);
 		for (const p of players) {
 			const l = signals.get(p.steamId);
@@ -643,7 +1068,9 @@ export async function dryRun(
 				steamEnabled: steamEnabled(env),
 				bannedOn: l?.bannedOn ?? [],
 				watched: l?.watched ?? null,
+				resembles: l?.resembles ?? [],
 				reserved: reserved.has(p.steamId),
+				performance: performance.get(p.steamId),
 				now: to
 			});
 			if (verdict) push(seen.get(p.steamId)!.joinedAt, `kick ${p.name} (${p.steamId}): ${verdict}`);
@@ -657,13 +1084,107 @@ export async function dryRun(
 		);
 		return result;
 	}
+	if (kind === 'team_kill') {
+		const c = cfg as TeamKillConfig;
+		// Each team kill in the window, with the killer's running count since their session began
+		// (the session open at the time, else the hour before).
+		const rows = await env.db.execute<{
+			ts: Date;
+			killerName: string;
+			killerSteamId: string;
+			victimName: string;
+			n: string;
+		}>(sql`
+			SELECT k.ts, k.killer_name AS "killerName", k.killer_steam_id AS "killerSteamId",
+			       k.victim_name AS "victimName",
+			       (SELECT COUNT(*) FROM kills k2
+			         WHERE k2.server_id = k.server_id AND k2.killer_steam_id = k.killer_steam_id
+			           AND k2.team_kill AND k2.ts <= k.ts
+			           AND k2.ts >= COALESCE((SELECT MAX(s.joined_at) FROM player_sessions s
+			                                    WHERE s.server_id = k.server_id AND s.steam_id = k.killer_steam_id
+			                                      AND s.joined_at <= k.ts), k.ts - interval '1 hour')) AS n
+			  FROM kills k
+			 WHERE k.server_id = ${server.id} AND k.team_kill AND k.killer_steam_id IS NOT NULL
+			   AND k.ts >= ${from}
+			 ORDER BY k.ts ASC LIMIT 500`);
+		for (const r of rows) {
+			const stage = teamKillStage(c, Number(r.n));
+			if (!stage) continue;
+			const v = {
+				name: r.killerName,
+				victim: r.victimName,
+				count: Number(r.n),
+				server: server.name
+			};
+			push(
+				new Date(r.ts),
+				stage === 'kick'
+					? `kick ${r.killerName} (${r.killerSteamId}): ${renderTemplate(c.kickReason, v)}`
+					: `whisper ${r.killerName}: ${renderTemplate(c.warnMessage, v)}`
+			);
+		}
+		const [feed] = await env.db
+			.select({ configured: sql<boolean>`feed_token_hash IS NOT NULL` })
+			.from(servers)
+			.where(eq(servers.id, server.id));
+		if (!feed?.configured)
+			result.notes.push(
+				'This server has no kill feed set up (Config tab), so the rule cannot see any team kills.'
+			);
+		result.notes.push(
+			`${rows.length} team kill${rows.length === 1 ? '' : 's'} in the window, counted per killer within their session.`
+		);
+		return result;
+	}
+	if (kind === 'restart_notice') {
+		const c = cfg as RestartNoticeConfig;
+		const [live] = await env.db
+			.select({ startedAt: serverLive.startedAt, players: serverLive.playerCount })
+			.from(serverLive)
+			.where(eq(serverLive.serverId, server.id))
+			.limit(1);
+		const w = live?.startedAt
+			? restartWindow(live.startedAt.toISOString(), RESTART_AFTER_HOURS, to.getTime())
+			: null;
+		if (!w || !live?.startedAt) {
+			result.notes.push(
+				'The worker has not read this server’s uptime yet (GET /v1/health), so there is nothing to project.'
+			);
+			return result;
+		}
+		const dueAt = new Date(live.startedAt.getTime() + RESTART_AFTER_HOURS * 3600_000);
+		const v = {
+			server: server.name,
+			map: '…',
+			players: live.players,
+			max: '…',
+			uptime: fmtUptime(w.upMs)
+		};
+		if (c.leadMinutes) {
+			const leadAt = new Date(dueAt.getTime() - c.leadMinutes * 60_000);
+			push(
+				leadAt,
+				`${leadAt < to ? 'already ' : ''}broadcast: ${renderTemplate(c.leadMessage, { ...v, minutes: c.leadMinutes })}`
+			);
+		}
+		push(
+			dueAt,
+			`${w.due ? 'already ' : ''}broadcast: ${renderTemplate(c.message, { ...v, minutes: 0 })}`
+		);
+		result.notes.push(
+			`Up ${fmtUptime(w.upMs)}; the restart window ${w.due ? 'is open: the game restarts when this round ends' : `opens in ${fmtUptime(w.untilDueMs ?? 0)}`}. Times shown are the coming cycle, not a replay; each stage goes once per game start${c.repeatMinutes ? `, the main message again every ${c.repeatMinutes} min while the window stays open` : ''}, and only with at least ${c.minPlayers} on.`
+		);
+		return result;
+	}
 	const rows = await env.db
 		.select({
 			ts: samples.ts,
 			ok: samples.ok,
 			count: samples.playerCount,
+			max: samples.maxPlayers,
 			map: samples.map,
-			experiences: samples.experiences
+			experiences: samples.experiences,
+			scores: samples.scores
 		})
 		.from(samples)
 		.where(and(eq(samples.serverId, server.id), gte(samples.ts, from)))
@@ -672,12 +1193,148 @@ export async function dryRun(
 		result.notes.push('No samples in the last 24 hours; the poller may be off or the server new.');
 		return result;
 	}
+	if (kind === 'seed_reward') {
+		const c = cfg as SeedRewardConfig;
+		// A sample is written at least every sampleMs while the worker is up; a longer gap is
+		// time nobody was watching, and the live rule would not have credited it either.
+		const stretches = lowStretches(
+			rows.map((r) => ({ ts: r.ts.getTime(), ok: r.ok, count: r.count ?? 0 })),
+			c.lowAt,
+			to.getTime(),
+			2 * settings().sampleMs + 1000
+		);
+		const sessions = await env.db
+			.select({
+				steamId: playerSessions.steamId,
+				name: playerSessions.name,
+				joinedAt: playerSessions.joinedAt,
+				leftAt: playerSessions.leftAt
+			})
+			.from(playerSessions)
+			.where(and(eq(playerSessions.serverId, server.id), gte(playerSessions.lastSeen, from)))
+			.orderBy(asc(playerSessions.joinedAt))
+			.limit(5000);
+		if (sessions.length === 5000)
+			result.notes.push(
+				'Only the first 5000 sessions of the window were replayed; later ones are not shown.'
+			);
+		const fulls = fullMoments(
+			rows.map((r) => ({ ts: r.ts.getTime(), ok: r.ok, count: r.count ?? 0, max: r.max ?? 0 })),
+			c.fullAt
+		);
+		const totals = seedReplay(
+			stretches,
+			fulls,
+			sessions.map((s) => ({
+				steamId: s.steamId,
+				joinedAt: s.joinedAt.getTime(),
+				leftAt: s.leftAt ? s.leftAt.getTime() : null
+			})),
+			c.minutes * 60,
+			to.getTime(),
+			c.untilFull
+		);
+		let reserved = new Set<string>();
+		if (readReserved) {
+			try {
+				reserved = new Set(await readReserved());
+			} catch {
+				result.notes.push('Could not read the reserved slots; nobody was skipped for one.');
+			}
+		}
+		const names = new Map(sessions.map((s) => [s.steamId, s.name]));
+		const crossed = [...totals]
+			.filter(([, t]) => t.crossedAt !== null)
+			.sort((a, b) => a[1].crossedAt! - b[1].crossedAt!);
+		let held = 0;
+		for (const [steamId, t] of crossed) {
+			if (reserved.has(steamId)) {
+				held++;
+				continue;
+			}
+			const at = new Date(t.crossedAt!);
+			push(
+				at,
+				`reserve ${names.get(steamId)} (${steamId}) ${c.scope === 'server' ? 'here' : 'across the organisation'} until ${dateOf(new Date(at.getTime() + c.slotDays * 86400_000))}: ${Math.floor(t.seconds / 60)} min with ${c.lowAt} or fewer on`
+			);
+		}
+		const lowMinutes = Math.round(stretches.reduce((n, l) => n + (l.to - l.from), 0) / 60_000);
+		result.notes.push(
+			`The server was at or under ${c.lowAt} players for ${lowMinutes} min of the window; ${totals.size} player${totals.size === 1 ? '' : 's'} earned seed time${held ? `, ${held} of those who reached ${c.minutes} min already hold a reserved slot and would be skipped` : ''}.`
+		);
+		result.notes.push(
+			`Replayed over the last 24 hours only; the live rule adds up seed time over ${c.windowDays} day${c.windowDays === 1 ? '' : 's'}, so it can also fire for players this replay does not show.`
+		);
+		return result;
+	}
+	if (kind === 'name_filter') {
+		const c = cfg as NameFilterConfig;
+		// A name is a name whenever it was used: everyone who has played here, not only the last day.
+		const rows = await env.db.execute<{ steamId: string; name: string; joinedAt: Date }>(sql`
+			SELECT steam_id AS "steamId", name, MAX(joined_at) AS "joinedAt"
+			  FROM player_sessions
+			 WHERE server_id = ${server.id}
+			 GROUP BY steam_id, name
+			 ORDER BY MAX(joined_at) DESC LIMIT ${NAME_REPLAY_MAX}`);
+		let reserved = new Set<string>();
+		if (c.spareReserved && readReserved) {
+			try {
+				reserved = new Set(await readReserved());
+			} catch {
+				result.notes.push('Could not read the reserved slots; nobody was spared for one.');
+			}
+		}
+		let spared = 0;
+		for (const r of rows) {
+			const v = nameVerdict(c, r.name);
+			if (!v) continue;
+			if (reserved.has(r.steamId)) spared++;
+			else push(new Date(r.joinedAt), `${c.action} ${r.name} (${r.steamId}): ${v.verdict}`);
+		}
+		if (rows.length) result.from = new Date(rows[rows.length - 1].joinedAt).toISOString();
+		result.notes.push(
+			`${rows.length} name${rows.length === 1 ? '' : 's'} checked: everyone who has played here${rows.length === NAME_REPLAY_MAX ? `, the latest ${NAME_REPLAY_MAX}` : ''}, under each name they used.`
+		);
+		if (spared)
+			result.notes.push(
+				`${spared} more would match but hold${spared === 1 ? 's' : ''} a reserved slot.`
+			);
+		return result;
+	}
+	if (kind === 'match_broadcast') {
+		const c = cfg as MatchBroadcastConfig;
+		const ends = matchReplay(
+			rows.map((r) => ({
+				ts: r.ts.getTime(),
+				ok: r.ok,
+				map: r.map || '',
+				scores: Array.isArray(r.scores) ? (r.scores as { name: string; score: number }[]) : [],
+				count: r.count ?? 0
+			})),
+			2 * settings().sampleMs + 1000
+		);
+		for (const e of ends)
+			for (const { message } of matchBroadcastMessages(c, e.end, e.count, {
+				server: server.name,
+				map: e.map,
+				players: e.count,
+				max: '…',
+				cap: DEFAULT_SCORE_CAP
+			}))
+				push(new Date(e.ts), `broadcast (${e.count} on): ${message}`);
+		result.notes.push(
+			ends.length
+				? `${ends.length} match${ends.length === 1 ? '' : 'es'} ended in the window. Times shown are the sample that first saw the reset; live, the rule fires one poll after the round ends.`
+				: 'No match ended in the window: the map never changed and the scores never fell back.'
+		);
+		return result;
+	}
 	if (kind === 'broadcast') {
 		const c = cfg as BroadcastConfig;
 		let last: Date | null = null;
 		let index = 0;
 		for (const r of rows) {
-			if (!r.ok || (r.count ?? 0) < c.minPlayers) continue;
+			if (!r.ok || !broadcastWanted(c, r.count ?? 0)) continue;
 			if (last && r.ts.getTime() - last.getTime() < c.everyMinutes * 60_000) continue;
 			last = r.ts;
 			push(r.ts, `broadcast (${r.count} on): ${c.messages[index++ % c.messages.length]}`);

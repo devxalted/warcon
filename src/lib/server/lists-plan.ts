@@ -5,26 +5,6 @@ import type { ListKind } from '$lib/types';
 
 export type Kind = ListKind;
 
-/** What a failed reserved-slot add says when the server is full; the planner recomputes these each run instead of backing off. */
-export const RESERVED_FULL = 'Reserved slots are full';
-
-/** MaxReservedSlots from a ServerSettings.ini document, if the WDGameSession section sets it. */
-export function parseMaxReservedSlots(text: string): number | null {
-	let inSection = false;
-	for (const raw of text.split(/\r?\n/)) {
-		const line = raw.trim();
-		if (!line || line.startsWith(';') || line.startsWith('#')) continue;
-		if (line.startsWith('[')) {
-			inSection = /^\[\/Script\/WDGame\.WDGameSession\]$/i.test(line);
-			continue;
-		}
-		if (!inSection) continue;
-		const m = /^MaxReservedSlots\s*=\s*(\d+)\s*$/i.exec(line);
-		if (m) return Number(m[1]);
-	}
-	return null;
-}
-
 export interface GameFailure {
 	status: number;
 	code?: string;
@@ -32,11 +12,10 @@ export interface GameFailure {
 }
 
 /**
- * A POST the server refused because the entry is already there counts as applied. A full reserved
- * list and a config revision conflict are 409/412 too but mean the entry is *not* there.
+ * A POST the server refused because the entry is already there counts as applied. A config
+ * revision conflict is a 409/412 too but means the entry is *not* there.
  */
 export const isAlreadyApplied = (err: GameFailure): boolean =>
-	err.code !== 'reserved_full' &&
 	err.code !== 'revision_conflict' &&
 	(err.status === 409 || err.code === 'already' || /\balready\b/i.test(err.message));
 
@@ -70,11 +49,45 @@ export interface DesiredBan {
 	listId: string;
 }
 
+/** An active entry with the list it is on, as desiredOf takes it. */
+export interface DesiredEntry {
+	kind: Kind;
+	steamId: string;
+	reason: string;
+	listId: string;
+	/** the list's server, when the list belongs to one server; null for an org list */
+	serverId: string | null;
+}
+
+/**
+ * The bans and reserved slots a server's lists want on it, one per player and kind: a player on
+ * both the org list and the server's own list is wanted once, from the org list, so removing the
+ * org entry leaves the server's entry in force (the next sync re-attributes the slot to it).
+ */
+export function desiredOf(rows: DesiredEntry[]): {
+	bans: DesiredBan[];
+	reserved: DesiredReserve[];
+} {
+	const bans = new Map<string, DesiredBan>();
+	const reserved = new Map<string, DesiredReserve>();
+	const ordered = [...rows].sort(
+		(a, b) => Number(a.serverId !== null) - Number(b.serverId !== null)
+	);
+	for (const r of ordered) {
+		if (r.kind === 'ban') {
+			if (!bans.has(r.steamId))
+				bans.set(r.steamId, { steamId: r.steamId, reason: r.reason, listId: r.listId });
+		} else if (!reserved.has(r.steamId))
+			reserved.set(r.steamId, { steamId: r.steamId, listId: r.listId, member: false });
+	}
+	return { bans: [...bans.values()], reserved: [...reserved.values()] };
+}
+
 export interface DesiredReserve {
 	steamId: string;
 	listId: string;
-	priority: number;
-	addedAt: Date;
+	/** a slot the org hands its members, not an entry someone added */
+	member: boolean;
 }
 
 export interface StateLike {
@@ -88,12 +101,10 @@ export interface StateLike {
 
 export interface PlanInput {
 	now: Date;
-	/** MaxReservedSlots on this server; null = unknown or unlimited */
-	cap: number | null;
 	/** how long a failed add or remove waits before it is tried again */
 	retryAfterMs: number;
 	desired: { bans: DesiredBan[]; reserved: DesiredReserve[] };
-	observed: { bans: string[]; reserved: string[] };
+	observed: { reserved: string[] };
 	state: StateLike[];
 }
 
@@ -110,7 +121,7 @@ export interface PlanRef {
 }
 
 export interface SyncPlan {
-	/** to POST, removes first so a freed reserved slot can be reused in the same run */
+	/** to POST (after the removes) */
 	adds: PlanAdd[];
 	/** to DELETE: the panel put them there and they are no longer wanted */
 	removes: PlanRef[];
@@ -118,12 +129,8 @@ export interface SyncPlan {
 	confirms: PlanAdd[];
 	/** managed rows that are neither wanted nor present any more: drop them */
 	deletes: PlanRef[];
-	/** wanted reserved slots that do not fit under the cap: record as failed, no call */
-	overflow: (PlanAdd & { error: string })[];
 	/** wanted entries already on the server but not put there by the panel: left alone */
 	local: PlanRef[];
-	/** what the reserved list on the server will hold after the run (for the cap display) */
-	reservedUsed: number;
 }
 
 const byKind = (rows: StateLike[], kind: Kind) =>
@@ -132,7 +139,6 @@ const byKind = (rows: StateLike[], kind: Kind) =>
 const withinBackoff = (s: StateLike | undefined, now: Date, retryAfterMs: number): boolean =>
 	!!s &&
 	s.state === 'failed' &&
-	!s.error.startsWith(RESERVED_FULL) &&
 	!!s.attemptedAt &&
 	now.getTime() - s.attemptedAt.getTime() < retryAfterMs;
 
@@ -142,9 +148,7 @@ export function planSync(i: PlanInput): SyncPlan {
 		removes: [],
 		confirms: [],
 		deletes: [],
-		overflow: [],
-		local: [],
-		reservedUsed: 0
+		local: []
 	};
 
 	const settle = (
@@ -174,33 +178,32 @@ export function planSync(i: PlanInput): SyncPlan {
 		return toAdd;
 	};
 
-	const banAdds = settle(
-		'ban',
-		i.desired.bans.map((d) => ({ kind: 'ban', ...d })),
-		new Set(i.observed.bans),
-		byKind(i.state, 'ban')
+	// Bans are not planned: the panel enforces them itself (kickBanned in lists-sync.ts) and leaves
+	// the game's own ban list to whoever runs the server.
+	// The reserved list is unbounded on the game server (MaxReservedSlots holds player slots back
+	// for its members; it does not cap the list), so every wanted slot is added.
+	plan.adds.push(
+		...settle(
+			'reserve',
+			i.desired.reserved.map((d) => ({
+				kind: 'reserve' as const,
+				steamId: d.steamId,
+				listId: d.listId,
+				reason: ''
+			})),
+			new Set(i.observed.reserved),
+			byKind(i.state, 'reserve')
+		)
 	);
-	plan.adds.push(...banAdds);
-
-	const reserved = new Set(i.observed.reserved);
-	const reserveDesired = [...i.desired.reserved]
-		.sort((a, b) => b.priority - a.priority || a.addedAt.getTime() - b.addedAt.getTime())
-		.map((d) => ({ kind: 'reserve' as const, steamId: d.steamId, listId: d.listId, reason: '' }));
-	const reserveAdds = settle('reserve', reserveDesired, reserved, byKind(i.state, 'reserve'));
-	const removing = plan.removes.filter((r) => r.kind === 'reserve').length;
-	let used = reserved.size - removing;
-	const room = i.cap === null ? Infinity : Math.max(0, i.cap - used);
-	// reserveAdds keeps the priority order of reserveDesired
-	for (const [n, add] of reserveAdds.entries()) {
-		if (n < room) {
-			plan.adds.push(add);
-			used++;
-		} else {
-			plan.overflow.push({ ...add, error: `${RESERVED_FULL} (${i.cap}/${i.cap}).` });
-		}
-	}
-	plan.reservedUsed = used;
 	return plan;
 }
 
 export const planHasWork = (p: SyncPlan): boolean => p.adds.length > 0 || p.removes.length > 0;
+
+/** A ban the lists put on a server, as the worker holds it between syncs (see kickBanned). */
+export interface PanelBan {
+	steamId: string;
+	listId: string;
+	/** a kick the game refused: not tried again before this time */
+	retryAt?: number;
+}

@@ -5,7 +5,7 @@
 import type { Env } from './env';
 import type { OrgRow, ServerRow } from './access';
 import type { ListSyncSummary } from '$lib/types';
-import type { LiveView } from '$lib/types';
+import type { KillView, LiveView } from '$lib/types';
 import type { WarconEvent } from './events';
 import type { Priority } from './dispatcher';
 import type { SyncResult } from './lists-sync';
@@ -24,8 +24,11 @@ export interface Gateway {
 	live(env: Env, ids: string[]): Promise<Map<string, LiveView>>;
 	/** Someone is looking at these servers: keep them in the watched tier. */
 	interest(ids: string[]): void;
-	/** A command just went to this server: look again as soon as possible. */
-	observeSoon(serverId: string): void;
+	/**
+	 * A command just went to this server: look again as soon as possible. `lists` when a ban or
+	 * reserved slot changed, so the pass re-reads those too instead of waiting for the next snapshot.
+	 */
+	observeSoon(serverId: string, opts?: { lists?: boolean }): void;
 	/** Observes the server now and returns the view (a server just added, a read that cannot wait). */
 	observeNow(env: Env, serverId: string): Promise<LiveView | null>;
 	/** Pushes an org's lists to all its servers now. */
@@ -36,10 +39,12 @@ export interface Gateway {
 	settingsChanged(env: Env): Promise<void>;
 	/** A trigger on this server was created, changed or deleted: drop the worker's cached rule set. */
 	triggersChanged(serverId: string): void;
-	/** The build may have changed (a connection test ran): re-read capabilities and the server id at the next look. */
+	/** The build or config may have changed (a connection test or config apply ran): re-read capabilities, the server id and the held reserved slots at the next look. */
 	identityChanged(serverId: string): void;
 	/** A status-card webhook was added or changed: post or fix the cards now rather than at the next tick. */
 	statusChanged(): void;
+	/** The kill feed just delivered these for a server: publish them, and let kill rules see them. */
+	killsIngested(env: Env, serverId: string, kills: KillView[]): void;
 	/** Live events (observations, deliveries). */
 	subscribe(fn: (e: WarconEvent) => void): () => void;
 	/** The worker's scheduler stats (for /api/health and the settings page). */

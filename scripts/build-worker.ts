@@ -4,6 +4,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { BunPlugin } from 'bun';
+import { COMMIT_FILE, resolveCommit } from '../src/lib/server/build-info';
 
 const root = resolve(import.meta.dir, '..');
 const shims: BunPlugin = {
@@ -34,7 +35,11 @@ const shims: BunPlugin = {
 };
 
 const result = await Bun.build({
-	entrypoints: [resolve(root, 'src/worker/worker.ts'), resolve(root, 'src/worker/migrate.ts')],
+	entrypoints: [
+		resolve(root, 'src/worker/worker.ts'),
+		resolve(root, 'src/worker/migrate.ts'),
+		resolve(root, 'src/worker/reset-auth.ts')
+	],
 	outdir: resolve(root, 'build'),
 	target: 'bun',
 	format: 'esm',
@@ -47,4 +52,6 @@ if (!result.success) {
 	for (const log of result.logs) console.error(log);
 	process.exit(1);
 }
+// The commit this build came from, for the image, which has no .git to read it from.
+await Bun.write(resolve(root, COMMIT_FILE), resolveCommit(root));
 console.log(`built ${result.outputs.map((o) => o.path.replace(root + '/', '')).join(', ')}`);

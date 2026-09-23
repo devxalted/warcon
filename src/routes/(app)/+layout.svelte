@@ -290,10 +290,7 @@
 				>
 			{/if}
 			{#if data.user.role === 'owner'}
-				<a href="/users" class="nav-pill {isActive('/users') ? 'nav-pill-active' : ''}">Users</a>
-				<a href="/settings" class="nav-pill {isActive('/settings') ? 'nav-pill-active' : ''}"
-					>Settings</a
-				>
+				<a href="/admin" class="nav-pill {isActive('/admin') ? 'nav-pill-active' : ''}">Admin</a>
 			{/if}
 		</nav>
 
@@ -346,8 +343,7 @@
 							<a href={orgNav.href} class="menu-item" role="menuitem">{orgNav.label}</a>
 						{/if}
 						{#if data.user.role === 'owner'}
-							<a href="/users" class="menu-item" role="menuitem">Users</a>
-							<a href="/settings" class="menu-item" role="menuitem">Settings</a>
+							<a href="/admin" class="menu-item" role="menuitem">Admin</a>
 						{/if}
 						<div class="my-1.5 border-t border-white/8"></div>
 					</nav>
@@ -360,6 +356,29 @@
 		</div>
 	</div>
 </header>
+
+{#if !data.user.authComplete && data.authPolicy.nudge && !data.user.apiKey && !page.url.pathname.startsWith('/account')}
+	<div class="page-x pt-4">
+		<a
+			href="/account?enrol=1"
+			class="flex flex-wrap items-center justify-between gap-2 rounded-ctl border border-warn/30 bg-warn/10 px-3 py-2 text-[13px] hover:bg-warn/15"
+		>
+			<span>
+				<span class="font-medium">Finish setting up your sign-in.</span>
+				Two ways in, and an authenticator app on any password, so a lost device is not a lost account.
+			</span>
+			<span class="text-mist-400">
+				{#if data.authPolicy.enforced && data.enrolment.daysLeft !== null}
+					{data.enrolment.daysLeft} day{data.enrolment.daysLeft === 1 ? '' : 's'} left →
+				{:else if data.authPolicy.enforced}
+					Required →
+				{:else}
+					Recommended →
+				{/if}
+			</span>
+		</a>
+	</div>
+{/if}
 
 <main class="page-x py-6">
 	{@render children()}

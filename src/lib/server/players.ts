@@ -1,6 +1,6 @@
 // Player intelligence: the dossier (history across an org's servers, Steam data, risk, notes,
 // watchlist) and the marks the players table shows next to each connected player.
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { Env } from './env';
 import { ApiError, str } from './http';
 import { queryAudit, writeAudit } from './audit';
@@ -14,10 +14,19 @@ import {
 	type SessionUser
 } from './access';
 import { orgListMembership } from './lists';
-import { playerMarks, playerNotes, playerSessions, serverBans, servers } from './db/schema';
+import { kills, playerMarks, playerNotes, playerSessions, serverBans, servers } from './db/schema';
 import { getProfiles, isSteamId, steamEnabled, type SteamProfileRow } from './steam';
-import { accountAgeDays, assessRisk, namesResemble, type Risk } from './risk';
-import type { DossierView, PlayerMark, PlayerNoteView, SteamView } from '$lib/types';
+import { accountAgeDays, assessRisk, namesResemble, type Risk, type RiskPerformance } from './risk';
+import { riskPerformanceFor } from './leaderboards';
+import type {
+	DossierView,
+	PlayerCombat,
+	PlayerMark,
+	PlayerNoteView,
+	SteamView,
+	CombatSummary
+} from '$lib/types';
+import { killView } from './feed';
 
 export { requireSteamId } from './steam';
 
@@ -38,6 +47,10 @@ export function steamView(row: SteamProfileRow | undefined | null): SteamView | 
 		daysSinceLastBan: row.daysSinceLastBan,
 		communityBanned: row.communityBanned,
 		economyBan: row.economyBan,
+		friendsState: row.friendsState,
+		friendsTotal: row.friendsTotal,
+		friendsChecked: row.friendsChecked,
+		bannedFriends: row.bannedFriends,
 		fetchedAt: row.fetchedAt.toISOString(),
 		error: row.error
 	};
@@ -155,34 +168,44 @@ export async function localSignals(
 export function riskFor(
 	env: Env,
 	profile: SteamProfileRow | undefined,
-	local: LocalSignals | undefined
+	local: LocalSignals | undefined,
+	/** recorded games on the servers the reader can open, never the whole org's */
+	performance: RiskPerformance | undefined,
+	/** false leaves the watchlist reason out of the risk line: it is a staff note */
+	staff = true
 ): Risk {
 	return assessRisk({
 		profile: profile ?? null,
 		steamEnabled: steamEnabled(env),
-		watched: local?.watched ?? null,
+		watched: local?.watched ? { reason: staff ? local.watched.reason : '' } : null,
 		bannedOn: local?.bannedOn ?? [],
-		resembles: local?.resembles ?? []
+		resembles: local?.resembles ?? [],
+		performance: performance ?? null
 	});
 }
 
 /** Marks for the players table: watchlist, first visit, risk. One batch per refresh. */
 export async function marksFor(
 	env: Env,
+	user: SessionUser,
 	server: ServerRow,
+	access: ServerAccess,
 	players: { steamId: string; name: string }[]
 ): Promise<PlayerMark[]> {
 	const ids = [...new Set(players.map((p) => p.steamId).filter(isSteamId))];
 	if (!ids.length) return [];
-	const orgIds = (await orgServers(env, server.orgId)).map((s) => s.id);
-	const [profiles, local, counts] = await Promise.all([
+	// Bans elsewhere in the org count only where the reader could open them, as in the dossier.
+	const orgIds = (await accessibleServers(env, user, server.orgId)).map((s) => s.id);
+	const staff = access.caps.has('players.notes') || access.caps.has('players.notes.manage');
+	const [profiles, local, counts, performance] = await Promise.all([
 		getProfiles(env, ids),
 		localSignals(env, server.orgId, orgIds, server.id, players),
 		env.db
 			.select({ steamId: playerSessions.steamId, n: sql<number>`count(*)` })
 			.from(playerSessions)
 			.where(and(eq(playerSessions.serverId, server.id), inArray(playerSessions.steamId, ids)))
-			.groupBy(playerSessions.steamId)
+			.groupBy(playerSessions.steamId),
+		riskPerformanceFor(env, orgIds, ids)
 	]);
 	const visits = new Map(counts.map((c) => [c.steamId, num(c.n)]));
 	return ids.map((steamId) => {
@@ -190,9 +213,9 @@ export async function marksFor(
 		return {
 			steamId,
 			watched: !!l?.watched,
-			reason: l?.watched?.reason ?? '',
+			reason: staff ? (l?.watched?.reason ?? '') : '',
 			firstVisit: (visits.get(steamId) ?? 0) <= 1,
-			risk: riskFor(env, profiles.get(steamId), l)
+			risk: riskFor(env, profiles.get(steamId), l, performance.get(steamId), staff)
 		};
 	});
 }
@@ -256,38 +279,55 @@ export async function dossier(
 	const online = recent.find((s) => s.leftAt === null) ?? null;
 	const name = names[0]?.name || steamId;
 
-	const [profiles, local, [mark], noteRows, actions, org, listsRole, allOrgServers] =
-		await Promise.all([
-			getProfiles(env, [steamId], { refresh: !!opts.refreshSteam }),
-			localSignals(env, server.orgId, ids, null, [{ steamId, name }]),
-			db
-				.select()
-				.from(playerMarks)
-				.where(and(eq(playerMarks.orgId, server.orgId), eq(playerMarks.steamId, steamId)))
-				.limit(1),
-			db
-				.select()
-				.from(playerNotes)
-				.where(and(eq(playerNotes.orgId, server.orgId), eq(playerNotes.steamId, steamId)))
-				.orderBy(desc(playerNotes.id))
-				.limit(100),
-			auditVisibility(env, user).then((visibleTo) =>
-				queryAudit(env, {
-					target: steamId,
-					scope: { orgId: server.orgId, serverIds: ids },
-					visibleTo,
-					limit: 50
-				})
-			),
-			getOrg(env, server.orgId),
-			listsRoleFor(env, user, server.orgId),
-			orgServers(env, server.orgId)
-		]);
+	const [
+		profiles,
+		local,
+		[mark],
+		noteRows,
+		actions,
+		org,
+		listsRole,
+		allOrgServers,
+		combat,
+		performance
+	] = await Promise.all([
+		getProfiles(env, [steamId], {
+			refresh: !!opts.refreshSteam,
+			awaitFriends: !!opts.refreshSteam
+		}),
+		localSignals(env, server.orgId, ids, null, [{ steamId, name }]),
+		db
+			.select()
+			.from(playerMarks)
+			.where(and(eq(playerMarks.orgId, server.orgId), eq(playerMarks.steamId, steamId)))
+			.limit(1),
+		db
+			.select()
+			.from(playerNotes)
+			.where(and(eq(playerNotes.orgId, server.orgId), eq(playerNotes.steamId, steamId)))
+			.orderBy(desc(playerNotes.id))
+			.limit(100),
+		auditVisibility(env, user).then((visibleTo) =>
+			queryAudit(env, {
+				target: steamId,
+				scope: { orgId: server.orgId, serverIds: ids },
+				visibleTo,
+				limit: 50
+			})
+		),
+		getOrg(env, server.orgId),
+		listsRoleFor(env, user, server.orgId),
+		orgServers(env, server.orgId),
+		playerCombat(env, ids, nameOf, steamId),
+		riskPerformanceFor(env, ids, [steamId])
+	]);
 	const l = local.get(steamId);
 	const admin = access.caps.has('players.notes.manage');
-	const membership = org
-		? await orgListMembership(env, org, steamId)
-		: { ban: null, reserve: null };
+	// What staff wrote about the player is for those who may write it; the org list entry (its
+	// reason, who added it, where it stands on every server) for those who may open the lists.
+	const staff = admin || access.caps.has('players.notes');
+	const membership =
+		org && listsRole ? await orgListMembership(env, org, steamId) : { ban: null, reserve: null };
 	return {
 		steamId,
 		name,
@@ -299,11 +339,11 @@ export async function dossier(
 		orgLists: { ...membership, canEdit: listsRole !== null },
 		steamEnabled: steamEnabled(env),
 		steam: steamView(profiles.get(steamId)),
-		risk: riskFor(env, profiles.get(steamId), l),
+		risk: riskFor(env, profiles.get(steamId), l, performance.get(steamId), staff),
 		watch: {
 			watched: !!mark?.watched,
-			reason: mark?.reason ?? '',
-			updatedByName: mark?.updatedByName ?? '',
+			reason: staff ? (mark?.reason ?? '') : '',
+			updatedByName: staff ? (mark?.updatedByName ?? '') : '',
 			updatedAt: iso(mark?.updatedAt)
 		},
 		bannedOn: (l?.bannedOn ?? []).map((b) => ({
@@ -312,6 +352,7 @@ export async function dossier(
 			reason: b.reason,
 			bannedBy: b.bannedBy
 		})),
+		combat,
 		summary: {
 			sessions: num(summary?.sessions),
 			minutes: Math.round(num(summary?.minutes)),
@@ -339,11 +380,12 @@ export async function dossier(
 			lastSeen: s.lastSeen.toISOString(),
 			leftAt: iso(s.leftAt),
 			minutes: Math.round(((s.leftAt ?? new Date()).getTime() - s.joinedAt.getTime()) / 60000),
+			seedMinutes: Math.round(s.seedSeconds / 60),
 			kills: s.kills,
 			deaths: s.deaths,
 			cash: s.cash
 		})),
-		notes: noteRows.map((n) => ({
+		notes: (staff ? noteRows : []).map((n) => ({
 			id: n.id,
 			authorId: n.authorId,
 			authorName: n.authorName,
@@ -488,3 +530,98 @@ export async function setWatch(
 
 /** Players whose sessions on this org's servers the caller may not see are simply absent: nothing to guard. */
 export const _internal = { bansOn, lastNames, ne, isNull };
+
+/** The player's kill-feed record across these servers, or null when none of them has a feed. */
+async function playerCombat(
+	env: Env,
+	serverIds: string[],
+	nameOf: Map<string, string>,
+	steamId: string
+): Promise<PlayerCombat | null> {
+	const summary = await combatSummary(env, serverIds, steamId);
+	if (!summary) return null;
+	const recent = await env.db
+		.select()
+		.from(kills)
+		.where(
+			and(
+				inArray(kills.serverId, serverIds),
+				or(eq(kills.killerSteamId, steamId), eq(kills.victimSteamId, steamId))
+			)
+		)
+		.orderBy(desc(kills.ts))
+		.limit(25);
+	return {
+		...summary,
+		recent: recent.map((r) => ({
+			...killView(r),
+			serverId: r.serverId,
+			serverName: nameOf.get(r.serverId) || r.serverId
+		}))
+	};
+}
+
+/**
+ * The totals, weapons, most-killed and nemeses without the recent rows: the public career page
+ * shows exactly this. Null when none of the servers has a feed and the player is in no kill.
+ */
+export async function combatSummary(
+	env: Env,
+	serverIds: string[],
+	steamId: string
+): Promise<CombatSummary | null> {
+	if (!serverIds.length) return null;
+	const db = env.db;
+	const [feed] = await db
+		.select({ n: sql<number>`COUNT(*)` })
+		.from(servers)
+		.where(and(inArray(servers.id, serverIds), sql`${servers.feedTokenHash} IS NOT NULL`));
+	const [t] = await db.execute<{
+		kills: string;
+		deaths: string;
+		headshots: string;
+		teamKills: string;
+		teamKilled: string;
+		suicides: string;
+		avg: string | null;
+		longest: string | null;
+	}>(sql`
+		SELECT COUNT(*) FILTER (WHERE killer_steam_id = ${steamId} AND NOT suicide) AS kills,
+		       COUNT(*) FILTER (WHERE victim_steam_id = ${steamId}) AS deaths,
+		       COUNT(*) FILTER (WHERE killer_steam_id = ${steamId} AND headshot AND NOT suicide) AS headshots,
+		       COUNT(*) FILTER (WHERE killer_steam_id = ${steamId} AND team_kill) AS "teamKills",
+		       COUNT(*) FILTER (WHERE victim_steam_id = ${steamId} AND team_kill) AS "teamKilled",
+		       COUNT(*) FILTER (WHERE victim_steam_id = ${steamId} AND suicide) AS suicides,
+		       AVG(distance_m) FILTER (WHERE killer_steam_id = ${steamId} AND NOT suicide) AS avg,
+		       MAX(distance_m) FILTER (WHERE killer_steam_id = ${steamId} AND NOT suicide) AS longest
+		  FROM kills WHERE server_id IN ${serverIds}
+		   AND (killer_steam_id = ${steamId} OR victim_steam_id = ${steamId})`);
+	if (!num(feed?.n) && !num(t?.kills) && !num(t?.deaths)) return null;
+	const [causes, victims, nemeses] = await Promise.all([
+		db.execute<{ cause: string; kills: string }>(sql`
+			SELECT cause, COUNT(*) AS kills FROM kills
+			 WHERE server_id IN ${serverIds} AND killer_steam_id = ${steamId} AND NOT suicide AND cause IS NOT NULL
+			 GROUP BY cause ORDER BY kills DESC LIMIT 8`),
+		db.execute<{ steamId: string; name: string; kills: string }>(sql`
+			SELECT victim_steam_id AS "steamId", MAX(victim_name) AS name, COUNT(*) AS kills FROM kills
+			 WHERE server_id IN ${serverIds} AND killer_steam_id = ${steamId} AND NOT suicide
+			 GROUP BY victim_steam_id ORDER BY kills DESC LIMIT 5`),
+		db.execute<{ steamId: string; name: string; deaths: string }>(sql`
+			SELECT killer_steam_id AS "steamId", MAX(killer_name) AS name, COUNT(*) AS deaths FROM kills
+			 WHERE server_id IN ${serverIds} AND victim_steam_id = ${steamId} AND killer_steam_id IS NOT NULL AND NOT suicide
+			 GROUP BY killer_steam_id ORDER BY deaths DESC LIMIT 5`)
+	]);
+	return {
+		kills: num(t?.kills),
+		deaths: num(t?.deaths),
+		headshots: num(t?.headshots),
+		teamKills: num(t?.teamKills),
+		teamKilled: num(t?.teamKilled),
+		suicides: num(t?.suicides),
+		avgDistanceM: t?.avg === null || t?.avg === undefined ? null : Math.round(num(t.avg)),
+		longestM: t?.longest === null || t?.longest === undefined ? null : Math.round(num(t.longest)),
+		causes: causes.map((r) => ({ cause: r.cause, kills: num(r.kills) })),
+		victims: victims.map((r) => ({ steamId: r.steamId, name: r.name, kills: num(r.kills) })),
+		nemeses: nemeses.map((r) => ({ steamId: r.steamId, name: r.name, deaths: num(r.deaths) }))
+	};
+}
