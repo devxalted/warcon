@@ -19,6 +19,10 @@
 	let { data }: PageProps = $props();
 	let d = $derived<DossierView>(data.dossier);
 	let id = $derived(data.server.id);
+	/** This player's kills on this server, filtered: the kills view reads its filter from the URL. */
+	let fullHistoryHref = $derived(
+		`/server/${encodeURIComponent(id)}/kills?player=${encodeURIComponent(d.steamId)}`
+	);
 	let moderate = $derived(can(data.server.caps, 'players.moderate'));
 	let chat = $derived(can(data.server.caps, 'chat.send'));
 	let bans = $derived(can(data.server.caps, 'bans.manage'));
@@ -308,19 +312,16 @@
 					From the game's kill feed, across the organisation's servers you can see. A team kill
 					counts as a kill here and a suicide as a death, and the feed only knows the time since it
 					was set up, so these differ from the scoreboard totals at the top.
-					<a
-						href="/server/{encodeURIComponent(data.server.id)}/kills?player={encodeURIComponent(
-							d.steamId
-						)}"
-						class="text-accent hover:underline">Every kill and death on this server →</a
-					>
 				</p>
 				<CombatSummary
 					combat={d.combat}
 					hrefFor={(steamId) => `/server/${encodeURIComponent(id)}/players/${steamId}`}
 				/>
 				{#if d.combat.recent.length}
-					<span class="mt-4 field-label">Recent kills and deaths</span>
+					<div class="mt-4 flex items-baseline justify-between gap-3">
+						<span class="field-label">Recent kills and deaths</span>
+						<a class="btn btn-sm" href={fullHistoryHref}>Full kill history</a>
+					</div>
 					<div class="max-h-[320px] table-wrap">
 						<table>
 							<thead
