@@ -31,20 +31,49 @@ scale, split into `web` + `worker` services with `RELAY_SECRET`/`RELAY_URL` inst
 
 ## Database
 
-Neon, project `ep-soft-poetry-av8x2a89` (us-east-1) -- the same Neon instance the
-website and Discord bot use, but a **separate database** named `warcon`, not `neondb`.
+Supabase project **`manticorps-warcon`** (ref `looxidbpskeghzclvvxf`, us-east-1,
+Postgres 17), its own project -- not shared with the website or the bot, which are
+on `manticorps-site`. Reached through the **session pooler**
+(`aws-0-us-east-1.pooler.supabase.com:5432`, user `postgres.<ref>`): Warcon is one
+long-running process that holds connections and uses prepared statements, which is
+what session mode is for. Railway's `DATABASE_URL` and Doppler `warcon/prd`
+`DATABASE_URL` both hold it.
 
-This is not optional. Warcon and the website both define `matches` and
-`player_sessions`, and Warcon's Better Auth tables (`user`, `session`, `account`,
-`verification`) would collide with next-auth the moment the website adds an adapter.
-Sharing `public` would fail on the first migration.
+**Why its own project, and why not Neon.** Until 2026-09-30 this was a `warcon`
+database on the website's Neon project. Warcon polls continuously, so that compute
+never slept: about six compute-hours a day against the free plan's hundred a month.
+The quota ran out and took the panel, the website and the bot's tickets down
+together. Moved with `scripts/move-databases-to-supabase.sh` (kept for the record;
+it verified every table's row count). A paid Supabase project is always on and has
+no compute-hour meter, and keeping the panel apart means its load is never again
+billed to, or able to stop, the other two.
 
-Cross-app data therefore moves over Warcon's API keys and Discord webhooks, not SQL
-joins. There is no TimescaleDB on Neon; Warcon detects that and the worker prunes old
-samples itself instead of using a hypertable retention policy.
+**Supabase's Data API must stay shut out.** Supabase grants its `anon` and
+`authenticated` roles everything in `public` by default; with RLS off, anyone
+holding the project's *public* anon key could read every table over REST --
+sessions, encrypted RCON passwords, the audit log. Revoked, including default
+privileges for tables created later. **Re-run this after any restore that
+recreates `public`:**
 
-Note that Warcon polls its game servers continuously, so the Neon compute never
-autosuspends. That is a real change in Neon billing versus a website that idles.
+```sql
+REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated;
+REVOKE USAGE ON SCHEMA public FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES    FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
+```
+
+Check: `select count(*) from information_schema.role_table_grants where grantee in
+('anon','authenticated') and table_schema='public'` must be 0.
+
+No TimescaleDB (Supabase does not offer it on Postgres 17, and Neon never had it).
+Warcon detects that and the worker prunes old samples itself. The kill log is never
+pruned and is stored uncompressed -- around 1-1.5 GB a year at the current
+population, inside the 8 GB the project includes for years.
+
+Cross-app data moves over Warcon's API keys and Discord webhooks, never SQL joins.
 
 ## Secrets
 
