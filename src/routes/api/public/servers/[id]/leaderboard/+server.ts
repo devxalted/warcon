@@ -1,5 +1,6 @@
 // Public leaderboard JSON: the same board as /s/<id>/leaderboard, same query parameters as the
-// panel's route. 404 unless leaderboards are on; rate limited per address.
+// panel's route. 404 unless leaderboards are on; rate limited per address. Cash is dropped: it is
+// staff-only on the website's privacy line, even though the panel's own board shows it.
 import { getEnv } from '$lib/server/env';
 import { apiJson, param, route } from '$lib/server/http';
 import {
@@ -22,6 +23,6 @@ export const GET = route(async (event) => {
 			? (await publicOrgServers(env, ps.org, 'leaderboards')).map((s) => s.id)
 			: [ps.server.id];
 	const board = await loadBoard(env, ids, q);
-	const rows = board.rows.map((r) => ({ ...r, name: publicName(r.name) }));
+	const rows = board.rows.map(({ cash: _cash, ...r }) => ({ ...r, name: publicName(r.name) }));
 	return apiJson({ ok: true, ...board, rows, maxPage: PUBLIC_MAX_PAGE }, 200, publicHeaders(30));
 });

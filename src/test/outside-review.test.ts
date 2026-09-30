@@ -175,12 +175,14 @@ describe.skipIf(!hasTestDb)('outside review: against the database', () => {
 		}
 	});
 
-	test('by design: a public leaderboard row carries the SteamID (the career link) and the in-game cash', async () => {
+	// Upstream publishes cash here; this fork does not -- cash is staff-only on manticorps.gg.
+	test('by design: a public leaderboard row carries the SteamID (the career link) but not the in-game cash', async () => {
 		const board = (await get('api/public/servers/[id]/leaderboard', null, 'minMinutes=0')).body as {
 			rows: Record<string, unknown>[];
 		};
 		const row = board.rows.find((r) => r.name === 'Reader')!;
-		expect(row).toMatchObject({ steamId: ME, cash: 4321 });
+		expect(row).toMatchObject({ steamId: ME });
+		expect(row).not.toHaveProperty('cash');
 	});
 
 	test('a stranger reads the top thousand of a public board, no deeper; the panel board has no ceiling', async () => {

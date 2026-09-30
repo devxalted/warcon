@@ -99,8 +99,10 @@ export interface PublicKill {
 	/** null: the environment */
 	killer: { name: string; faction: string | null } | null;
 	victim: { name: string; faction: string | null };
-	/** the raw weapon or vehicle tag; $lib/causes labels it */
+	/** the raw weapon or vehicle tag */
 	cause: string | null;
+	/** the tag as a reader would say it ("Galil", "Hammer (large)"); the raw tag if unknown */
+	causeLabel: string;
 	distanceM: number | null;
 	headshot: boolean;
 	suicide: boolean;
@@ -118,6 +120,7 @@ export const publicKill = (k: KillView): PublicKill => ({
 	killer: k.killer ? { name: publicName(k.killer.name), faction: k.killer.faction } : null,
 	victim: { name: publicName(k.victim.name), faction: k.victim.faction },
 	cause: k.cause,
+	causeLabel: causeLabel(k.cause) || k.cause || '',
 	distanceM: k.distanceM,
 	headshot: k.headshot,
 	suicide: k.suicide,
@@ -377,13 +380,11 @@ export interface PublicPlayerKill extends Omit<PublicKill, 'killer' | 'victim'> 
 	killer: { steamId: string | null; name: string; faction: string | null } | null;
 	victim: { steamId: string; name: string; faction: string | null };
 	map: string | null;
-	causeLabel: string;
 }
 
 export const publicPlayerKill = (k: KillView): PublicPlayerKill => ({
 	...publicKill(k),
 	map: k.map ?? null,
-	causeLabel: causeLabel(k.cause) || k.cause || '',
 	killer: k.killer
 		? {
 				steamId: k.killer.steamId ?? null,

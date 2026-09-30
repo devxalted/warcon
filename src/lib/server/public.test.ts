@@ -27,6 +27,7 @@ describe('publicKill', () => {
 			killer: { name: 'Ghostpepper', faction: 'Valkyra' },
 			victim: { name: 'Nomad', faction: 'Lonestar' },
 			cause: 'Id.Item.AK74M',
+			causeLabel: expect.any(String),
 			distanceM: 61.2,
 			headshot: true,
 			suicide: false,
@@ -34,6 +35,7 @@ describe('publicKill', () => {
 			tags: ['Penetration']
 		});
 		expect(JSON.stringify(k)).not.toContain('7656119');
+		expect(k.causeLabel).not.toBe('');
 	});
 	test('an environment kill has no killer', () => {
 		expect(publicKill({ ...kill, killer: null }).killer).toBeNull();
