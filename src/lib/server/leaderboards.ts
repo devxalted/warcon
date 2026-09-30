@@ -18,7 +18,10 @@ import {
 	BOARD_PAGE,
 	DEFAULT_FLOOR_MINUTES,
 	groupCareer,
+	kdRatio,
 	matchResult,
+	perHour,
+	winRate,
 	rangeStart,
 	streak,
 	type BoardMetric,
@@ -183,23 +186,8 @@ export async function riskPerformanceFor(
 	return result;
 }
 
-/** How each metric orders the board (see metricValue in $lib/leaderboard). */
-const METRIC_SQL: Record<BoardMetric, ReturnType<typeof sql>> = {
-	kills: sql`kills`,
-	deaths: sql`deaths`,
-	kd: sql`CASE WHEN deaths > 0 THEN kills::float / deaths WHEN kills > 0 THEN kills::float ELSE NULL END`,
-	perHour: sql`CASE WHEN minutes > 0 THEN kills::float / (minutes / 60) ELSE NULL END`,
-	playtime: sql`minutes`,
-	seeded: sql`seed_minutes`,
-	matches: sql`matches`,
-	wins: sql`wins`,
-	winRate: sql`CASE WHEN wins + losses + draws > 0 THEN wins::float / (wins + losses + draws) ELSE NULL END`,
-	cash: sql`cash`
-};
-
 interface BaseRow extends Record<string, unknown> {
 	steamId: string;
-	name: string | null;
 	minutes: string;
 	seedMinutes: string;
 	cash: string;
@@ -213,7 +201,129 @@ interface BaseRow extends Record<string, unknown> {
 	wins: string;
 	losses: string;
 	draws: string;
-	total: string;
+}
+
+/** One player's totals over a range, unrounded: what every board over that range is cut from. */
+interface Totals {
+	steamId: string;
+	minutes: number;
+	seedMinutes: number;
+	cash: number;
+	lastSeen: string | null;
+	kills: number;
+	headshots: number;
+	teamKills: number;
+	deaths: number;
+	suicides: number;
+	matches: number;
+	wins: number;
+	losses: number;
+	draws: number;
+}
+
+/**
+ * How long a range's totals are served before they are recomputed. The totals query walks every
+ * session in the range against the matches (seconds, not milliseconds, at a few thousand
+ * players), and before this every sort, page and floor ran it again. Now a range is computed
+ * once and every board over it is a sort in memory.
+ */
+const TOTALS_FRESH_MS = 60_000;
+
+type TotalsEntry = { at: number; value: Promise<Totals[]>; refreshing: boolean };
+/** Per database handle (tests get a fresh one each), keyed by range and server set. */
+const totalsCache = new WeakMap<Env, Map<string, TotalsEntry>>();
+
+/**
+ * Every player's totals over these servers for the range. Stale-while-revalidate: past
+ * `TOTALS_FRESH_MS` the old totals are still returned while one refresh runs behind them, so
+ * only the very first read of a range waits on the query, and concurrent reads share it.
+ */
+function totalsFor(env: Env, ids: string[], range: BoardQuery['range']): Promise<Totals[]> {
+	let byKey = totalsCache.get(env);
+	if (!byKey) totalsCache.set(env, (byKey = new Map()));
+	const key = `${range}|${[...ids].sort().join(',')}`;
+	const hit = byKey.get(key);
+	const now = Date.now();
+	if (hit && now - hit.at < TOTALS_FRESH_MS) return hit.value;
+	if (hit) {
+		if (!hit.refreshing) {
+			hit.refreshing = true;
+			const next = queryTotals(env, ids, range);
+			next.then(
+				() => byKey.set(key, { at: Date.now(), value: next, refreshing: false }),
+				() => (hit.refreshing = false)
+			);
+		}
+		return hit.value;
+	}
+	const value = queryTotals(env, ids, range);
+	const entry: TotalsEntry = { at: now, value, refreshing: false };
+	byKey.set(key, entry);
+	value.catch(() => {
+		if (byKey.get(key) === entry) byKey.delete(key);
+	});
+	return value;
+}
+
+/** Forget cached totals, so the next read queries (tests that write between two reads). */
+export function forgetBoardTotals(env: Env): void {
+	totalsCache.delete(env);
+}
+
+async function queryTotals(env: Env, ids: string[], range: BoardQuery['range']): Promise<Totals[]> {
+	const from = rangeStart(range) ?? EPOCH;
+	const rows = (await env.db.execute<BaseRow>(sql`
+		WITH ${base(ids, from)}
+		SELECT steam_id AS "steamId", minutes, seed_minutes AS "seedMinutes", cash, last_seen AS "lastSeen",
+		       kills, headshots, team_kills AS "teamKills", deaths, suicides, matches, wins, losses, draws
+		  FROM base WHERE steam_id IS NOT NULL`)) as BaseRow[];
+	return rows.map((r) => ({
+		steamId: r.steamId,
+		minutes: num(r.minutes),
+		seedMinutes: num(r.seedMinutes),
+		cash: num(r.cash),
+		lastSeen: iso(r.lastSeen),
+		kills: num(r.kills),
+		headshots: num(r.headshots),
+		teamKills: num(r.teamKills),
+		deaths: num(r.deaths),
+		suicides: num(r.suicides),
+		matches: num(r.matches),
+		wins: num(r.wins),
+		losses: num(r.losses),
+		draws: num(r.draws)
+	}));
+}
+
+/** How each metric orders the board, on the unrounded totals (see metricValue in $lib/leaderboard). */
+function metricOf(t: Totals, metric: BoardMetric): number | null {
+	switch (metric) {
+		case 'kd':
+			return kdRatio(t.kills, t.deaths);
+		case 'perHour':
+			return perHour(t.kills, t.minutes);
+		case 'playtime':
+			return t.minutes;
+		case 'winRate':
+			return winRate(t.wins, t.losses, t.draws);
+		case 'seeded':
+			return t.seedMinutes;
+		default:
+			return t[metric];
+	}
+}
+
+/** The board's order: the metric (nulls last either way), then kills, then SteamID. */
+function boardOrder(metric: BoardMetric, dir: BoardQuery['dir']) {
+	return (a: Totals, b: Totals): number => {
+		const va = metricOf(a, metric);
+		const vb = metricOf(b, metric);
+		if (va === null || vb === null) {
+			if (va !== vb) return va === null ? 1 : -1;
+		} else if (va !== vb) return dir === 'asc' ? va - vb : vb - va;
+		if (a.kills !== b.kills) return b.kills - a.kills;
+		return a.steamId < b.steamId ? -1 : a.steamId > b.steamId ? 1 : 0;
+	};
 }
 
 /** Whether any of these servers has a kill feed (without one the board has playtime alone). */
@@ -230,52 +340,44 @@ async function anyFeed(env: Env, ids: string[]): Promise<boolean> {
 export async function loadBoard(env: Env, ids: string[], q: BoardQuery): Promise<BoardView> {
 	const empty: BoardView = { query: q, rows: [], total: 0, pageSize: BOARD_PAGE, hasFeed: false };
 	if (!ids.length) return empty;
-	const from = rangeStart(q.range) ?? EPOCH;
-	const order = q.dir === 'asc' ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
 	const offset = (q.page - 1) * BOARD_PAGE;
-	const [rowsRaw, hasFeed] = await Promise.all([
-		env.db.execute<BaseRow>(sql`
-			WITH ${base(ids, from)},
-			page AS (
-				SELECT *, COUNT(*) OVER () AS total FROM base
-				 WHERE minutes >= ${q.minMinutes}
-				 ORDER BY ${METRIC_SQL[q.sort]} ${order}, kills DESC, steam_id
-				 LIMIT ${BOARD_PAGE} OFFSET ${offset})
-			SELECT r.steam_id AS "steamId", r.minutes, r.seed_minutes AS "seedMinutes", r.cash, r.last_seen AS "lastSeen",
-			       r.kills, r.headshots, r.team_kills AS "teamKills", r.deaths, r.suicides,
-			       r.matches, r.wins, r.losses, r.draws, r.total,
-			       (SELECT name FROM player_sessions ps WHERE ps.steam_id = r.steam_id AND ps.server_id IN ${ids}
-			         ORDER BY ps.last_seen DESC LIMIT 1) AS name
-			  FROM page r`),
-		anyFeed(env, ids)
-	]);
-	const rows = rowsRaw as BaseRow[];
+	const [totals, hasFeed] = await Promise.all([totalsFor(env, ids, q.range), anyFeed(env, ids)]);
+	const ranked = totals.filter((t) => t.minutes >= q.minMinutes).sort(boardOrder(q.sort, q.dir));
+	const page = ranked.slice(offset, offset + BOARD_PAGE);
+	const names = new Map<string, string>();
+	if (page.length) {
+		const rows = await env.db.execute<{ steamId: string; name: string }>(sql`
+			SELECT DISTINCT ON (steam_id) steam_id AS "steamId", name FROM player_sessions
+			 WHERE steam_id IN ${page.map((t) => t.steamId)} AND server_id IN ${ids}
+			 ORDER BY steam_id, last_seen DESC`);
+		for (const r of rows) names.set(r.steamId, r.name);
+	}
 	return {
 		query: q,
-		rows: rows.map((r, i) => shapeRow(r, offset + i + 1)),
-		total: rows.length ? num(rows[0].total) : 0,
+		rows: page.map((t, i) => shapeRow(t, names.get(t.steamId) ?? null, offset + i + 1)),
+		total: ranked.length,
 		pageSize: BOARD_PAGE,
 		hasFeed
 	};
 }
 
-const shapeRow = (r: BaseRow, rank: number): BoardRow => ({
+const shapeRow = (t: Totals, name: string | null, rank: number): BoardRow => ({
 	rank,
-	steamId: r.steamId,
-	name: r.name || r.steamId,
-	minutes: Math.round(num(r.minutes)),
-	seedMinutes: Math.round(num(r.seedMinutes)),
-	kills: num(r.kills),
-	deaths: num(r.deaths),
-	headshots: num(r.headshots),
-	teamKills: num(r.teamKills),
-	suicides: num(r.suicides),
-	matches: num(r.matches),
-	wins: num(r.wins),
-	losses: num(r.losses),
-	draws: num(r.draws),
-	cash: num(r.cash),
-	lastSeen: iso(r.lastSeen)
+	steamId: t.steamId,
+	name: name || t.steamId,
+	minutes: Math.round(t.minutes),
+	seedMinutes: Math.round(t.seedMinutes),
+	kills: t.kills,
+	deaths: t.deaths,
+	headshots: t.headshots,
+	teamKills: t.teamKills,
+	suicides: t.suicides,
+	matches: t.matches,
+	wins: t.wins,
+	losses: t.losses,
+	draws: t.draws,
+	cash: t.cash,
+	lastSeen: t.lastSeen
 });
 
 /** The name the player was last seen with on these servers; null when never seen there. */
@@ -289,16 +391,15 @@ export async function lastNameOf(env: Env, ids: string[], steamId: string): Prom
 
 /**
  * The player's position on the all-time kills board over these servers at the default floor:
- * one more than the players above them; null when they are under the floor or unknown.
+ * one more than the players above them; null when they are under the floor or unknown. Read off
+ * the cached all-time totals, so a career page costs no board query of its own.
  */
 export async function rankOf(env: Env, ids: string[], steamId: string): Promise<number | null> {
 	if (!ids.length) return null;
-	const [row] = await env.db.execute<{ qualifies: boolean | null; above: string }>(sql`
-		WITH ${base(ids, EPOCH)},
-		me AS (SELECT kills, minutes FROM base WHERE steam_id = ${steamId})
-		SELECT (SELECT minutes >= ${DEFAULT_FLOOR_MINUTES} FROM me) AS qualifies,
-		       (SELECT COUNT(*) FROM base, me WHERE base.minutes >= ${DEFAULT_FLOOR_MINUTES} AND base.kills > me.kills) AS above`);
-	return row?.qualifies ? num(row.above) + 1 : null;
+	const totals = await totalsFor(env, ids, 'all');
+	const me = totals.find((t) => t.steamId === steamId);
+	if (!me || me.minutes < DEFAULT_FLOOR_MINUTES) return null;
+	return totals.filter((t) => t.minutes >= DEFAULT_FLOOR_MINUTES && t.kills > me.kills).length + 1;
 }
 
 interface CombatRow extends Record<string, unknown> {
