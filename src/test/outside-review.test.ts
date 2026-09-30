@@ -183,6 +183,8 @@ describe.skipIf(!hasTestDb)('outside review: against the database', () => {
 		const row = board.rows.find((r) => r.name === 'Reader')!;
 		expect(row).toMatchObject({ steamId: ME });
 		expect(row).not.toHaveProperty('cash');
+		const byCash = await get('api/public/servers/[id]/leaderboard', null, 'minMinutes=0&sort=cash');
+		expect(byCash.body).toMatchObject({ query: { sort: 'kills' } });
 	});
 
 	test('a stranger reads the top thousand of a public board, no deeper; the panel board has no ceiling', async () => {
