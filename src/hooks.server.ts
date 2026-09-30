@@ -28,6 +28,7 @@ import { loadSettings } from '$lib/server/settings';
 import { beginShutdown } from '$lib/server/shutdown';
 import { httpRequests, httpRequestSeconds, routeLabel } from '$lib/server/metrics';
 import { registerFleetCollector } from '$lib/server/metrics-fleet';
+import { publicPageOf, publicPageUrl } from '$lib/public-site';
 
 const SECURITY_HEADERS: Record<string, string> = {
 	'x-content-type-options': 'nosniff',
@@ -145,6 +146,17 @@ const handleRequest: Handle = async ({ event, resolve }) => {
 	const auth = getAuth();
 	event.locals.auth = auth;
 	const path = event.url.pathname;
+
+	// A separate website is the public face (PUBLIC_SITE_URL): the panel's own public pages send
+	// people there, before any of their loads run. /api/public stays on -- the website reads it.
+	if (env.PUBLIC_SITE_URL && event.route.id?.startsWith('/(public)')) {
+		const found = publicPageOf(path);
+		const location = found
+			? publicPageUrl('', env.PUBLIC_SITE_URL, found.serverId, found.page)
+			: env.PUBLIC_SITE_URL;
+		return new Response(null, { status: 302, headers: { location } });
+	}
+
 	const isApi = isApiRequest(path, event.route.id);
 	const isAuthApi = path.startsWith('/api/auth');
 

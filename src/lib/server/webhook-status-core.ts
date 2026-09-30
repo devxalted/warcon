@@ -4,6 +4,7 @@
 // This module is pure so the layout is testable; it also derives the key that says whether the
 // substance changed since the last edit (Discord renders the relative clock itself, so the
 // clocks are not part of it) and keeps every part inside Discord's length limits.
+import { publicPageUrl } from '$lib/public-site';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { FactionScore, LiveView, Player } from '$lib/types';
@@ -62,14 +63,21 @@ export function cardLinks(
 	origin: string,
 	serverId: string,
 	flags: LinkFlags,
-	features: FeatureSet
+	features: FeatureSet,
+	siteUrl: string | null = null
 ): CardLink[] {
 	const id = encodeURIComponent(serverId);
 	const out: CardLink[] = [];
 	if (flags.linkStatus && features.status)
-		out.push({ label: 'Live status', url: `${origin}/s/${id}` });
+		out.push({
+			label: 'Live status',
+			url: publicPageUrl(origin, siteUrl, serverId, { kind: 'status' })
+		});
 	if (flags.linkLeaderboard && features.leaderboards)
-		out.push({ label: 'Leaderboard', url: `${origin}/s/${id}/leaderboard` });
+		out.push({
+			label: 'Leaderboard',
+			url: publicPageUrl(origin, siteUrl, serverId, { kind: 'leaderboard' })
+		});
 	if (flags.linkPanel) out.push({ label: 'Panel', url: `${origin}/server/${id}` });
 	return out;
 }

@@ -14,6 +14,7 @@
 		type BoardView
 	} from '$lib/leaderboard';
 	import { effectiveFeatures } from '$lib/features';
+	import { publicPageUrl } from '$lib/public-site';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -23,6 +24,9 @@
 	let loading = $state(false);
 	let seq = 0;
 	let publicOn = $derived(effectiveFeatures(data.server, data.server).leaderboards);
+	let publicBoard = $derived(
+		publicPageUrl(page.url.origin, page.data.publicSiteUrl, id, { kind: 'leaderboard' })
+	);
 
 	async function load(q: BoardQuery) {
 		const my = ++seq;
@@ -64,8 +68,8 @@
 		counted when a session overlapped it, with the result read against the faction of the player's
 		last session in it. Names link to the dossier.
 		{#if publicOn}This board is also public at <a
-				href="/s/{encodeURIComponent(id)}/leaderboard"
-				class="text-accent hover:underline">/s/{id}/leaderboard</a
+				href={publicBoard}
+				class="text-accent hover:underline">{publicBoard.replace(/^https?:\/\//, '')}</a
 			>.{/if}
 	</p>
 </div>

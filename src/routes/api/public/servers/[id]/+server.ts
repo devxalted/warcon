@@ -11,7 +11,7 @@ import {
 
 export const GET = route(async (event) => {
 	const env = getEnv();
-	limitPublicReads(event.request);
+	limitPublicReads(event.request, env);
 	const ps = await requirePublicServer(env, param(event, 'id'), 'status');
 	return apiJson({ ok: true, server: await readPublicStatus(env, ps) }, 200, publicHeaders(5));
 });

@@ -94,3 +94,36 @@ describe('publicStatus roster', () => {
 		expect(publicStatus(server(false), live, null).roster[0].steamId).toBeNull();
 	});
 });
+
+describe('the website surface', () => {
+	test('publicName hides a name the word list catches, and keeps an ordinary one', async () => {
+		const { publicName, HIDDEN_NAME } = await import('./public');
+		expect(publicName('Ghostpepper')).toBe('Ghostpepper');
+		expect(publicName('n1gger')).toBe(HIDDEN_NAME);
+		expect(publicName('')).toBe('');
+	});
+
+	test('the trusted token must match exactly, and nothing is trusted without one set', async () => {
+		const { trustedCaller, PUBLIC_TOKEN_HEADER } = await import('./public');
+		const req = (t?: string) =>
+			new Request('https://x', { headers: t ? { [PUBLIC_TOKEN_HEADER]: t } : {} });
+		expect(trustedCaller(req('s3cret-token'), 's3cret-token')).toBe(true);
+		expect(trustedCaller(req('s3cret-tokex'), 's3cret-token')).toBe(false);
+		expect(trustedCaller(req('short'), 's3cret-token')).toBe(false);
+		expect(trustedCaller(req(), 's3cret-token')).toBe(false);
+		expect(trustedCaller(req('anything'), undefined)).toBe(false);
+	});
+
+	test("a player's history keeps SteamIDs for links, labels the weapon, filters names", async () => {
+		const { publicPlayerKill, HIDDEN_NAME } = await import('./public');
+		const k = publicPlayerKill({
+			...kill,
+			victim: { ...kill.victim, name: 'n1gger' }
+		});
+		expect(k.killer?.steamId).toBe('76561198100000101');
+		expect(k.victim.steamId).toBe('76561198100000105');
+		expect(k.victim.name).toBe(HIDDEN_NAME);
+		expect(k.causeLabel).not.toBe('');
+		expect(k.map).toBe('Kavkazi');
+	});
+});
