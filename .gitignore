@@ -20,3 +20,6 @@ vite.config.ts.timestamp-*
 
 # Playwright MCP output
 .playwright-mcp
+
+# Supabase CLI scratch state (project link); never committed.
+supabase/.temp/

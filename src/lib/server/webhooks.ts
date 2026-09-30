@@ -352,7 +352,13 @@ export async function sendTestCard(
 			origin: env.ORIGIN,
 			now: Date.now(),
 			style: row.statusStyle,
-			links: cardLinks(env.ORIGIN, server.id, row, effectiveFeatures(org, server))
+			links: cardLinks(
+				env.ORIGIN,
+				server.id,
+				row,
+				effectiveFeatures(org, server),
+				env.PUBLIC_SITE_URL ?? null
+			)
 		},
 		{ id: server.id, name: server.name },
 		live

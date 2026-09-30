@@ -5,6 +5,7 @@ import { apiJson, param, route } from '$lib/server/http';
 import {
 	limitPublicReads,
 	publicHeaders,
+	publicName,
 	publicOrgServers,
 	requirePublicServer
 } from '$lib/server/public';
@@ -13,16 +14,14 @@ import { parseBoardQuery, PUBLIC_MAX_PAGE } from '$lib/leaderboard';
 
 export const GET = route(async (event) => {
 	const env = getEnv();
-	limitPublicReads(event.request);
+	limitPublicReads(event.request, env);
 	const ps = await requirePublicServer(env, param(event, 'id'), 'leaderboards');
 	const q = parseBoardQuery(event.url.searchParams, PUBLIC_MAX_PAGE);
 	const ids =
 		q.scope === 'org'
 			? (await publicOrgServers(env, ps.org, 'leaderboards')).map((s) => s.id)
 			: [ps.server.id];
-	return apiJson(
-		{ ok: true, ...(await loadBoard(env, ids, q)), maxPage: PUBLIC_MAX_PAGE },
-		200,
-		publicHeaders(30)
-	);
+	const board = await loadBoard(env, ids, q);
+	const rows = board.rows.map((r) => ({ ...r, name: publicName(r.name) }));
+	return apiJson({ ok: true, ...board, rows, maxPage: PUBLIC_MAX_PAGE }, 200, publicHeaders(30));
 });

@@ -4,6 +4,8 @@
 	// (the site owner can close them for the organization). Org owners only, like the server
 	// dialog that carries the same switches.
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
+	import { publicPageUrl } from '$lib/public-site';
 	import { api, errorMessage } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import Badge from '$lib/components/Badge.svelte';
@@ -15,15 +17,17 @@
 	let orgPage = $derived(`/orgs/${encodeURIComponent(data.server.orgId)}`);
 
 	const KEY = { status: 'publicStatus', leaderboards: 'publicLeaderboards' } as const;
-	const PATH = { status: '', leaderboards: '/leaderboard' } as const;
 	const ABOUT: Record<PublicFeature, string> = {
 		status:
 			'Map, mode, scores, player count, join code and who is on with kills and deaths, refreshed every twenty seconds.',
 		leaderboards:
 			"The same board as the Leaderboards tab (this server, or the organization's public servers), and a career page per player."
 	};
+	// On the website when one is the public face, else here (see $lib/public-site).
 	const address = (feature: PublicFeature) =>
-		`${data.origin}/s/${encodeURIComponent(data.server.id)}${PATH[feature]}`;
+		publicPageUrl(data.origin, page.data.publicSiteUrl, data.server.id, {
+			kind: feature === 'status' ? 'status' : 'leaderboard'
+		});
 
 	async function patch(body: Record<string, boolean>, done: string) {
 		busy = true;

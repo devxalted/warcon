@@ -55,6 +55,18 @@ export interface Env {
 	POLL_CONCURRENCY?: string;
 	/** Bearer for GET /metrics (Prometheus) on the web and worker processes; the endpoint is off when unset. */
 	METRICS_TOKEN?: string;
+	/**
+	 * A separate website that is the public face (manticorps.gg). When set, this panel's own
+	 * public pages (/s/...) redirect there and every link to them points there instead; the
+	 * public JSON under /api/public stays on, because that is what the website reads.
+	 */
+	PUBLIC_SITE_URL?: string;
+	/**
+	 * Shared with that website. A public read carrying it in `x-warcon-public-token` is limited
+	 * as one trusted caller rather than per address -- the website's server fetches arrive from
+	 * a handful of addresses and would otherwise share one visitor's allowance.
+	 */
+	PUBLIC_API_TOKEN?: string;
 }
 
 export type Role = 'all' | 'web' | 'worker';
@@ -103,7 +115,7 @@ export function isDemoServer(
 }
 
 /** ORIGIN must be a bare origin: scheme, host and optional port, nothing after. */
-function parseOrigin(value: string | undefined): string {
+function parseOrigin(value: string | undefined, name = 'ORIGIN'): string {
 	const raw = (value || '').trim();
 	let url: URL | null = null;
 	try {
@@ -113,7 +125,7 @@ function parseOrigin(value: string | undefined): string {
 	}
 	if (!url || url.origin !== raw || !/^https?:$/.test(url.protocol))
 		throw new Error(
-			`ORIGIN must be the exact URL people open, e.g. https://rcon.example.com or http://localhost:5173 (got ${JSON.stringify(raw)}).`
+			`${name} must be the exact URL people open, e.g. https://rcon.example.com or http://localhost:5173 (got ${JSON.stringify(raw)}).`
 		);
 	return url.origin;
 }
@@ -197,7 +209,11 @@ export async function initEnv(opts: { role?: Role } = {}): Promise<Env> {
 		TURNSTILE_SECRET_KEY: processEnv.TURNSTILE_SECRET_KEY,
 		GAME_TLS_INSECURE: processEnv.GAME_TLS_INSECURE,
 		POLL_SECONDS: processEnv.POLL_SECONDS,
-		POLL_CONCURRENCY: processEnv.POLL_CONCURRENCY
+		POLL_CONCURRENCY: processEnv.POLL_CONCURRENCY,
+		PUBLIC_SITE_URL: processEnv.PUBLIC_SITE_URL
+			? parseOrigin(processEnv.PUBLIC_SITE_URL, 'PUBLIC_SITE_URL')
+			: undefined,
+		PUBLIC_API_TOKEN: processEnv.PUBLIC_API_TOKEN || undefined
 	};
 	return cached;
 }
