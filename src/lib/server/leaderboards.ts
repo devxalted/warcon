@@ -388,7 +388,10 @@ export async function loadCareer(
 		losses: count('loss'),
 		draws: count('draw'),
 		maps: groupCareer(
-			results.map((r) => ({ key: r.map, result: r.result })),
+			// Both sides to the catalog id: the game has sent the id on one and the name players
+			// know on the other, and which is which has changed (matches now say "Ozeti", the
+			// feed "Europe").
+			results.map((r) => ({ key: r.map ? mapId(r.map) : null, result: r.result })),
 			combat.map((c) => ({ key: mapId(c.map), kills: num(c.kills), deaths: num(c.deaths) }))
 		),
 		factions: groupCareer(

@@ -6,6 +6,7 @@ import { getEnv } from '$lib/server/env';
 import { ApiError, apiJson, param, route } from '$lib/server/http';
 import {
 	limitPublicReads,
+	publicCareer,
 	publicCombat,
 	publicHeaders,
 	publicName,
@@ -43,7 +44,7 @@ export const GET = route(async (event) => {
 			ok: true,
 			player: { steamId, name: publicName(name), avatar: steam.get(steamId)?.avatar || null },
 			profile,
-			career,
+			career: publicCareer(career),
 			combat: publicCombat(combat)
 		},
 		200,

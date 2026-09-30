@@ -14,6 +14,8 @@ import { assertRate } from './ratelimit';
 import { nameVerdict, type NameFilterConfig } from './name-filter';
 import type { CombatSummary } from '$lib/types';
 import { causeLabel } from '$lib/causes';
+import { mapId, mapName } from '$lib/format';
+import type { CareerView } from '$lib/leaderboard';
 import { effectiveFeatures, type FeatureSet, type PublicFeature } from '$lib/features';
 import { EMPTY_FILTER } from '$lib/kills';
 import type { KillView, LiveView } from '$lib/types';
@@ -384,7 +386,7 @@ export interface PublicPlayerKill extends Omit<PublicKill, 'killer' | 'victim'> 
 
 export const publicPlayerKill = (k: KillView): PublicPlayerKill => ({
 	...publicKill(k),
-	map: k.map ?? null,
+	map: k.map ? publicMap(k.map) : null,
 	killer: k.killer
 		? {
 				steamId: k.killer.steamId ?? null,
@@ -393,6 +395,16 @@ export const publicPlayerKill = (k: KillView): PublicPlayerKill => ({
 			}
 		: null,
 	victim: { steamId: k.victim.steamId, name: publicName(k.victim.name), faction: k.victim.faction }
+});
+
+/** A map as players know it ("Ozeti"), whichever name the game sent ("Europe" or "Ozeti"). */
+export const publicMap = (raw: string): string => mapName(mapId(raw));
+
+/** The career with every map named the way players know it; the panel keeps catalog ids. */
+export const publicCareer = (c: CareerView): CareerView => ({
+	...c,
+	maps: c.maps.map((g) => ({ ...g, key: publicMap(g.key) })),
+	last: c.last.map((m) => ({ ...m, map: m.map ? publicMap(m.map) : null }))
 });
 
 /** Public JSON may sit in a shared cache for a few seconds; the panel's own JSON never does. */
