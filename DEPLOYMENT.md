@@ -50,7 +50,7 @@ billed to, or able to stop, the other two.
 
 **Supabase's Data API must stay shut out.** Supabase grants its `anon` and
 `authenticated` roles everything in `public` by default; with RLS off, anyone
-holding the project's *public* anon key could read every table over REST --
+holding the project's _public_ anon key could read every table over REST --
 sessions, encrypted RCON passwords, the audit log. Revoked, including default
 privileges for tables created later. **Re-run this after any restore that
 recreates `public`:**
