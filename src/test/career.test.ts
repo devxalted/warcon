@@ -132,4 +132,62 @@ describe.skipIf(!hasTestDb)('career', () => {
 			{ key: 'NorthAmerica', matches: 1, wins: 1, losses: 0, draws: 0, kills: 2, deaths: 0 }
 		]);
 	});
+
+	// What the game sends now: the match says the name players know, the feed says the id.
+	test('a match named "Ozeti" and kills stored as "Europe" are one map', async () => {
+		const w = await seedWorld(env);
+		const t0 = Date.now() - 5 * HOUR;
+		const [match] = await env.db
+			.insert(matches)
+			.values({
+				serverId: w.server.id,
+				startedAt: new Date(t0),
+				endedAt: new Date(t0 + HOUR),
+				map: 'Ozeti',
+				finalScores: [
+					{ name: 'Lonestar', score: 100 },
+					{ name: 'Wagner', score: 40 }
+				],
+				winner: 'Lonestar'
+			})
+			.returning({ id: matches.id });
+		await env.db.insert(playerSessions).values({
+			serverId: w.server.id,
+			steamId: STEAM,
+			name: 'ARTEC',
+			faction: 'Lonestar',
+			joinedAt: new Date(t0 + 1000),
+			lastSeen: new Date(t0 + HOUR),
+			leftAt: new Date(t0 + HOUR)
+		});
+		await env.db.insert(kills).values({
+			ts: new Date(t0 + 60_000),
+			serverId: w.server.id,
+			eventId: `${w.server.id}-eu`,
+			instanceId: 'i',
+			matchId: 'm',
+			matchRow: match.id,
+			eventTime: 1,
+			map: 'Europe',
+			killerSteamId: STEAM,
+			killerName: 'ARTEC',
+			killerFaction: 'Lonestar',
+			victimSteamId: '76561198000000062',
+			victimName: 'other',
+			victimFaction: 'Wagner',
+			tags: []
+		});
+		const career = await loadCareer(env, {
+			serverId: w.server.id,
+			ids: [w.server.id],
+			nameOf: new Map(),
+			steamId: STEAM
+		});
+		expect(career.maps).toEqual([
+			{ key: 'Europe', matches: 1, wins: 1, losses: 0, draws: 0, kills: 1, deaths: 0 }
+		]);
+		const { publicCareer } = await import('$lib/server/public');
+		expect(publicCareer(career).maps[0].key).toBe('Ozeti');
+		expect(publicCareer(career).last[0].map).toBe('Ozeti');
+	});
 });

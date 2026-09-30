@@ -126,6 +126,16 @@ describe('the website surface', () => {
 		expect(k.victim.steamId).toBe('76561198100000105');
 		expect(k.victim.name).toBe(HIDDEN_NAME);
 		expect(k.causeLabel).not.toBe('');
-		expect(k.map).toBe('Kavkazi');
+		expect(k.map).toBe('Bakurani'); // the feed's id, named as players know it
+	});
+});
+
+describe('publicMap', () => {
+	test('names a map the way players know it, whichever name the game sent', async () => {
+		const { publicMap } = await import('./public');
+		expect(publicMap('Europe')).toBe('Ozeti');
+		expect(publicMap('Ozeti')).toBe('Ozeti');
+		expect(publicMap('NorthAmerica')).toBe('Zestafona');
+		expect(publicMap('SomethingNew')).toBe('Something New');
 	});
 });
