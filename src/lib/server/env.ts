@@ -56,17 +56,21 @@ export interface Env {
 	/** Bearer for GET /metrics (Prometheus) on the web and worker processes; the endpoint is off when unset. */
 	METRICS_TOKEN?: string;
 	/**
+	 * Not PUBLIC_-prefixed on purpose: SvelteKit hides PUBLIC_* variables from
+	 * $env/dynamic/private and treats them as safe to send to browsers, so a token named
+	 * that way would be both unreadable here and one import away from every page.
+	 *
 	 * A separate website that is the public face (manticorps.gg). When set, this panel's own
 	 * public pages (/s/...) redirect there and every link to them points there instead; the
 	 * public JSON under /api/public stays on, because that is what the website reads.
 	 */
-	PUBLIC_SITE_URL?: string;
+	WEBSITE_URL?: string;
 	/**
 	 * Shared with that website. A public read carrying it in `x-warcon-public-token` is limited
 	 * as one trusted caller rather than per address -- the website's server fetches arrive from
 	 * a handful of addresses and would otherwise share one visitor's allowance.
 	 */
-	PUBLIC_API_TOKEN?: string;
+	WEBSITE_API_TOKEN?: string;
 }
 
 export type Role = 'all' | 'web' | 'worker';
@@ -210,10 +214,10 @@ export async function initEnv(opts: { role?: Role } = {}): Promise<Env> {
 		GAME_TLS_INSECURE: processEnv.GAME_TLS_INSECURE,
 		POLL_SECONDS: processEnv.POLL_SECONDS,
 		POLL_CONCURRENCY: processEnv.POLL_CONCURRENCY,
-		PUBLIC_SITE_URL: processEnv.PUBLIC_SITE_URL
-			? parseOrigin(processEnv.PUBLIC_SITE_URL, 'PUBLIC_SITE_URL')
+		WEBSITE_URL: processEnv.WEBSITE_URL
+			? parseOrigin(processEnv.WEBSITE_URL, 'WEBSITE_URL')
 			: undefined,
-		PUBLIC_API_TOKEN: processEnv.PUBLIC_API_TOKEN || undefined
+		WEBSITE_API_TOKEN: processEnv.WEBSITE_API_TOKEN || undefined
 	};
 	return cached;
 }

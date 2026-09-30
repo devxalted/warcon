@@ -1,4 +1,4 @@
-// Where a server's public pages live. Normally here, under /s/<id>. When PUBLIC_SITE_URL names a
+// Where a server's public pages live. Normally here, under /s/<id>. When WEBSITE_URL names a
 // separate website as the public face, they live there instead: this panel's /s/ pages redirect
 // to it and every link to them (the settings page, the leaderboard note, Discord status cards)
 // points at it. Client-safe and pure, so both the redirect and the links come from one mapping.
