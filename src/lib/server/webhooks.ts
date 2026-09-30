@@ -357,7 +357,7 @@ export async function sendTestCard(
 				server.id,
 				row,
 				effectiveFeatures(org, server),
-				env.PUBLIC_SITE_URL ?? null
+				env.WEBSITE_URL ?? null
 			)
 		},
 		{ id: server.id, name: server.name },

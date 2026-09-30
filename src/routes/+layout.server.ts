@@ -15,6 +15,6 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 		user: locals.user,
 		appName: env.APP_NAME || 'Warcon',
 		// Where public pages live, for the links to them (see $lib/public-site).
-		publicSiteUrl: env.PUBLIC_SITE_URL ?? null
+		publicSiteUrl: env.WEBSITE_URL ?? null
 	};
 };

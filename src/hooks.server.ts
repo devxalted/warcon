@@ -147,13 +147,13 @@ const handleRequest: Handle = async ({ event, resolve }) => {
 	event.locals.auth = auth;
 	const path = event.url.pathname;
 
-	// A separate website is the public face (PUBLIC_SITE_URL): the panel's own public pages send
+	// A separate website is the public face (WEBSITE_URL): the panel's own public pages send
 	// people there, before any of their loads run. /api/public stays on -- the website reads it.
-	if (env.PUBLIC_SITE_URL && event.route.id?.startsWith('/(public)')) {
+	if (env.WEBSITE_URL && event.route.id?.startsWith('/(public)')) {
 		const found = publicPageOf(path);
 		const location = found
-			? publicPageUrl('', env.PUBLIC_SITE_URL, found.serverId, found.page)
-			: env.PUBLIC_SITE_URL;
+			? publicPageUrl('', env.WEBSITE_URL, found.serverId, found.page)
+			: env.WEBSITE_URL;
 		return new Response(null, { status: 302, headers: { location } });
 	}
 

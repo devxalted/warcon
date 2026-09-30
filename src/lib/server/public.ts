@@ -198,8 +198,8 @@ export const publicHeading = (ps: PublicServer) => ({
 export const PUBLIC_READS_PER_MINUTE = 120;
 
 /**
- * The website that is the public face (PUBLIC_SITE_URL) reads this JSON from its own servers,
- * so every visitor it serves arrives from a handful of addresses. Carrying PUBLIC_API_TOKEN in
+ * The website that is the public face (WEBSITE_URL) reads this JSON from its own servers,
+ * so every visitor it serves arrives from a handful of addresses. Carrying WEBSITE_API_TOKEN in
  * this header makes it one trusted caller with its own, larger allowance -- still a ceiling, so a
  * leaked token is a nuisance rather than an outage.
  */
@@ -224,7 +224,7 @@ function currentEnv(): Env | null {
 }
 
 export const limitPublicReads = (req: Request, env: Env | null = currentEnv()): void =>
-	trustedCaller(req, env?.PUBLIC_API_TOKEN)
+	trustedCaller(req, env?.WEBSITE_API_TOKEN)
 		? assertRate('public:trusted', TRUSTED_READS_PER_MINUTE, 60_000)
 		: assertRate(`public:${clientIp(req)}`, PUBLIC_READS_PER_MINUTE, 60_000);
 

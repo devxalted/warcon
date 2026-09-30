@@ -158,7 +158,7 @@ async function refreshHook(
 		const { payload, key: substance } = statusMessage(
 			{
 				...opts,
-				links: cardLinks(env.ORIGIN, server.id, hook, server.features, env.PUBLIC_SITE_URL ?? null)
+				links: cardLinks(env.ORIGIN, server.id, hook, server.features, env.WEBSITE_URL ?? null)
 			},
 			server,
 			m && m.observedAt ? liveView(m) : null
